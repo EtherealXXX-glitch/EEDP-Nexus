@@ -1,0 +1,13 @@
+{
+  "api_version": 1,
+  "id": "slogic",
+  "name": "SLogic 逻辑分析仪",
+  "version": "1.1.0",
+  "entrypoint": "component.py:SLogic",
+  "description": "Combo8 设备发现、有界采集、离线协议解码和波形导出",
+  "schema_version": "1.1",
+  "documentation": "README.md",
+  "ui": {
+    "view": "logic"
+  }
+}

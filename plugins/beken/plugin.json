@@ -1,0 +1,13 @@
+{
+  "api_version": 1,
+  "id": "beken",
+  "name": "Beken 烧录",
+  "version": "1.1.0",
+  "entrypoint": "component.py:BekenFlash",
+  "description": "原厂引擎固件预检、烧录和进度跟踪",
+  "schema_version": "1.1",
+  "documentation": "README.md",
+  "ui": {
+    "view": "beken"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "api_version": 1,
+  "id": "serial",
+  "name": "串口监控",
+  "version": "1.2.0",
+  "entrypoint": "component.py:SerialMonitor",
+  "description": "串口收发、后台监控和共享通信记录",
+  "schema_version": "1.1",
+  "documentation": "README.md",
+  "ui": {
+    "view": "serial"
+  }
+}
