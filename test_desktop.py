@@ -28,6 +28,42 @@ class DesktopTemp(tempfile.TemporaryDirectory):
 
 
 class DesktopTest(unittest.TestCase):
+    def test_video_workspace_attaches_embedded_surface(self):
+        original = tk.Tk
+        failures, calls = [], []
+        def request(method, args=None):
+            if method == "settings.get": return {}
+            if method == "settings.update": return args["values"]
+            if method == "status": return {"components": {"video": {"state": "idle", "playing": False}}}
+            if method == "events": return dict(events=[], cursor=0, dropped=False)
+            if method == "tools": return [dict(id="video", name="视频播放")]
+            if method == "plugins.list": return [dict(id="video", name="视频播放", version="1.0.0", enabled=True)]
+            if method == "call":
+                calls.append(args)
+                return {"state": "idle", "playing": False}
+            raise ValueError(method)
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        class Root(original):
+            def __init__(self):
+                super().__init__()
+                self.after(900, self.check_view)
+                self.after(5000, self.finish)
+            def check_view(self):
+                try:
+                    widgets = list(descendants(self))
+                    if not any(isinstance(w, tk.Button) and w.cget("text") == "播放" for w in widgets): raise AssertionError("video view not opened")
+                    if not any(call.get("target") == "video.attach" and call["arguments"].get("window_id", 0) > 0 for call in calls): raise AssertionError("video surface not attached")
+                except Exception as exc: failures.append(exc)
+                self.finish()
+            def finish(self):
+                if self.winfo_exists(): self.tk.call(self.protocol("WM_DELETE_WINDOW"))
+        with DesktopTemp() as temp, patch.object(tk, "Tk", Root):
+            desktop.launch(request, lambda: None, Path(temp))
+        if failures: raise failures[0]
+
     def test_real_menu_entries_open_inline_help_about_and_service_status(self):
         original=tk.Tk
         failures=[]
@@ -201,7 +237,7 @@ class DesktopTest(unittest.TestCase):
             def exercise(self):
                 try:
                     widgets = list(descendants(self))
-                    port_box = next(w for w in widgets if isinstance(w, desktop.ttk.Combobox) and any("CH340" in value for value in w.cget("values")))
+                    port_box = next(w for w in widgets if isinstance(w, desktop.ttk.Combobox) and any("CH340" in str(value) for value in w.cget("values")))
                     port_box.current(0)
                     port_box.event_generate("<<ComboboxSelected>>")
                     if port_box.get() != "COM16": raise AssertionError("port selection included device description")

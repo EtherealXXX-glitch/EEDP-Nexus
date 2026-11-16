@@ -16,6 +16,9 @@ Windows 免安装程序：`release/EEDP-Nexus-v0.5.0/EEDP Nexus.exe`；发布 ZI
 
 四项设计要求：统一深色界面；Agent 接口优先；使用说明技能化；插件标准化、设置持久化、通信日志共享。
 
+视频播放组件支持工作台内嵌播放本地文件、网络地址和 UDP 流，可指定 H.264、MJPEG、MPEG-TS 或原始 YUV 输入；YUV 须设置宽、高、像素格式和帧率。RTP 等流可能需要 SDP 文件，自定义 UDP 分包须按协议适配。组件使用 [mpv 引擎](plugins/video/README.md)，Agent 可使用 `video.*` 动作；播放前须打开视频页面以绑定窗口。
+
+
 0.5.0 增加 SLogic Combo8 插件及波形工作区：原始电平、活动包络、时间轴、缩放、平移、游标、离线 UART/I²C/SPI 解码与 VCD/CSV 导出。用户和 Agent 使用相同状态及文件；未知信号电压不得开始采集。可用“示例波形”查看人工生成的 UART 示例，界面明确标注非设备实采。
 右侧活动栏按启用组件动态显示；组件管理和 Agent 配置内嵌并复用页面。日志切换不展示从头滚到尾的过程。
 组件规范的权威入口为 [COMPONENT-STANDARD.md](COMPONENT-STANDARD.md)，串口、烧录、逻辑分析均已迁移至 schema 1.1。运行 `python check-components.py` 可在不接触硬件的条件下检查契约；打包自动执行校验。
@@ -178,3 +181,9 @@ GUI 写入前确认；Agent CLI `beken.start` 会直接执行。中止或超时�
 本机引擎成功时退出码为 1，因此成功判定同时要求本次独立日志中出现
 `WriteFlash ->pass`、`Writing Flash OK` 和 `All Finished Successfully`。
 已验证窗口关闭 / 重开不影响任务，烧录后资源释放，串口能重新连接并收发换行 / 提示符。
+
+Receive display: at most 20 refreshes/sec, bounded batches and a 100,000-character view cache. Repeated NUL bytes are condensed; long lines are split. Overload skips old display entries with a notice. Raw backend events remain unchanged; pause only pauses display.
+
+双路视频发送组件 netvideo：离线预处理MJPEG/H.264，再向板卡TCP 5001/5002分别发送；转码或容器解复用需要显式提供可信FFmpeg路径，符合格式的原始 MJPEG 可直接校验。支持停止、重连、循环与H.264滑动限流，详见[组件说明](plugins/netvideo/README.md)及[协议责任文档](NETVIDEO-PROTOCOL.md)。板卡和手机曾完成短时联调，长期稳定性取决于网络及素材。
+
+视频工作区同时显示本地与远程状态，支持一键播放两路、单路播放和停止、素材预览；高级参数默认收起。可快速切换预生成的 MJPEG 30、40、45、50、55、60 KiB 单帧上限。先选择本组 `*-mjpeg-<档位>k-1024x608-12fps.mjpeg` 文件并填写板卡 IP；原始 MJPEG 档位无需 FFmpeg。按钮只停止并重新准备、启动 MJPEG，H.264 不受操作影响。目标档位文件缺失时不会停止当前播放；切换会从目标文件开头播放，不代表网络能够稳定承载所有档位。界面速率为发送端计数，非板卡接收率。

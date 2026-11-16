@@ -107,6 +107,7 @@ LogStore 负责分类、导出和归档；新附件目录必须同步更新分�
 组件管理和 Agent 配置属于主工作区页面，重复点击复用页面，不生成 N 个窗口。
 新组件默认 ui.view=generic，主界面按 actions 自动生成人可操作的参数表及结果视图，不修改固定标签列表。
 serial/beken/logic 为内置专用视图，分别绑定 serial/beken/slogic ID；插件核心仍不导入 GUI。
+视频组件使用 generic 清单保持兼容；桌面识别 video ID 提供内嵌播放视图，generic 动作入口仍保留，解码由组件自己的 mpv 进程完成。原始 YUV 参数须显式配置；UDP 自定义协议须单独适配。
 为新专业视图扩展渲染器时，必须保留相同后台动作契约和 generic 回退，并更新本手册及校验。
 UI 仅在主线程更新；请求/解码/文件 IO 在线程执行，过期或已销毁页面的回调必须丢弃。
 GUI IO 使用最多 4 个工作线程和 16 项有界队列；后台 RPC 最多 16 个并发处理线程。波形拖动/缩放先用本地缓存按帧反馈，后台精细数据请求节流合并，不等待拖动停止；缓存最多 8 个精细视窗及一份总览，隐藏视图不拉取波形。
@@ -137,4 +138,11 @@ API/行为不兼容时升级版本并写迁移说明；不能无声改变已发�
 出包前运行 `python check-components.py` 和相关测试；打包检查只用回环或离线数据，物理采集/发送/烧录另行明确验证。
 新插件可单独安装、启停和拆卸，发布目录必须包含完整 bin 及文档；发行包不含 .state、令牌或用户日志。
 
-当前内置组件均已迁移到 schema 1.1：serial、beken、slogic。每次维护都以可执行校验结果为准。
+当前内置组件均已迁移到 schema 1.1：serial、beken、slogic、video。每次维护都以可执行校验结果为准。
+
+netvideo 为独立、可拆卸的双路TCP视频发送组件，schema 1.1，通用工作区；prepare异步离线转码，start才连接板卡。两路各自拥有TCP资源并独立停止，任务运行时禁止禁用。媒体缓存位于.state/runtime/netvideo，不是历史附件；共享日志仅存摘要。不得自动发送板卡CLI切源命令，亦不得把发送完成当作板卡解码或手机播放成功。
+视频工作区同屏显示两路状态与常用操作，原始 MJPEG 直发必须逐帧校验后才能发送；该路径不需要 FFmpeg。快速切档只操作 MJPEG，不能隐式停止 H.264。发送端速率按帧计数差值标示，不等同于接收端实际帧率。
+
+组件活动栏右键提供组件设置及禁用入口；设置针对component.<id>共享范围，禁用交给后台生命周期检查，失败时显示原因，不得强制释放活动资源。netvideo MJPEG 每帧按SOF校验1024×608和采样21/11/11，无法符合时拒绝发送。
+
+Receive display: at most 20 refreshes/sec, bounded batches and a 100,000-character view cache. Repeated NUL bytes are condensed; long lines are split. Overload skips old display entries with a notice. Raw backend events remain unchanged; pause only pauses display.

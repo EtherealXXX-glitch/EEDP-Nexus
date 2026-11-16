@@ -12,3 +12,5 @@ pyserial 接收线程将原始 RX/TX 以 Base64 写入共享 Activity，同时�
 # 波特率
 
 桌面下拉框提供 35 个常见及高速预设（110–12000000，含 96000），支持手动输入。Agent 的 `connect.baudrate` 同样接受整数，不受桌面预设限制；实际支持范围取决于串口硬件和驱动，打开失败会返回错误并释放占用。
+
+Receive display: at most 20 refreshes/sec, bounded batches and a 100,000-character view cache. Repeated NUL bytes are condensed; long lines are split. Overload skips old display entries with a notice. Raw backend events remain unchanged; pause only pauses display.

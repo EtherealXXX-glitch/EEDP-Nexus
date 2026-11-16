@@ -22,6 +22,15 @@ def prepared_arguments(method, arguments):
     arguments = json.loads(json.dumps(arguments or {}))
     staged = None
     try:
+        if os.name != "nt" and method == "call" and arguments.get("target", "").startswith("netvideo."):
+            payload=arguments.setdefault("arguments",{})
+            for key in ("source","engine"):
+                original=payload.get(key,"")
+                if isinstance(original,str) and original.startswith("/"):
+                    converted=windows_path(original)
+                    if converted.startswith("\\\\"):
+                        raise ValueError("Network video media and FFmpeg must be on a Windows drive; use /mnt/c/... paths")
+                    payload[key]=converted
         if os.name != "nt" and method == "call" and arguments.get("target", "").startswith(("beken.","slogic.")):
             payload = arguments.setdefault("arguments", {})
             for key in ("firmware", "engine", "input"):

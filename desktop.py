@@ -13,10 +13,13 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from app_paths import APP_NAME, RESOURCES, FROZEN, CLI_EXE, ROOT
 from ui_diagnostics import UIDiagnostics
+from receive_display import preview, MAX_VIEW
 from log_store import diagnostic_path
 from log_center import open_log_center
 from plugin_tools import open_plugin_tools
 from logic_view import open_logic_view
+from video_view import open_video_view
+from netvideo_view import open_netvideo_view
 from themes import ThemeManager
 from buttons import ActionButton
 from appearance import build_appearance
@@ -142,6 +145,7 @@ def _launch(request, ensure_started, state_directory):
     for _ in range(4):
         threading.Thread(target=_io_worker,args=(request,io_tasks,result_queue,stopped),daemon=True).start()
     render_pending = deque(maxlen=2500)
+    render_clock = {"next": 0.0}
     restore = {"active":False, "remaining":0, "generation":0}
     events = {"serial": deque(maxlen=2500), "beken": deque(maxlen=2500)}
     history = deque(maxlen=500)
@@ -254,11 +258,15 @@ def _launch(request, ensure_started, state_directory):
     workspace_body.rowconfigure(0,weight=1)
     workspace_body.columnconfigure(0,weight=1)
     logic_host = frame(workspace_body, BG)
+    video_host = frame(workspace_body, BG)
+    netvideo_host = frame(workspace_body, BG)
     utility_host = frame(workspace_body, PANEL)
     utility_page = {"name":None, "refresh":None}
     empty_workspace = frame(workspace_body, BG)
     label(empty_workspace, "没有启用的组件\n从右侧组件管理安装或启用工具", muted=True, justify="center").pack(expand=True)
     logic_workspace = None
+    video_workspace = None
+    netvideo_workspace = None
 
     def rail_button(parent, text, command, icon="blocks"):
         item = button(parent, text, command, small=True, _flat=True)
@@ -384,11 +392,13 @@ def _launch(request, ensure_started, state_directory):
         bottom = mapped and not restore["active"] and terminal.yview()[1] > .95
         terminal.configure(state="normal")
         for text, kind in chunks:
-            terminal.insert("end", text.replace("\x00", "␀"), kind)
+            if int(terminal.index("end-1c").split(".")[1]) >= 256:
+                terminal.insert("end", "\n")
+            terminal.insert("end", preview(text), kind)
         if int(terminal.index("end-1c").split(".")[0]) > 5000:
             terminal.delete("1.0", "1500.0")
-        if (terminal.count("1.0", "end-1c", "chars") or (0,))[0] > 1_500_000:
-            terminal.delete("1.0", "end-1000000c")
+        if (terminal.count("1.0", "end-1c", "chars") or (0,))[0] > MAX_VIEW:
+            terminal.delete("1.0", f"end-{MAX_VIEW}c")
         terminal.configure(state="disabled")
         if not restore["active"] and autoscroll.get() and bottom: terminal.see("end")
 
@@ -422,14 +432,18 @@ def _launch(request, ensure_started, state_directory):
 
     def redraw():
         if selected not in events: return
-        restore.update(active=True, remaining=len(events[selected]), generation=restore["generation"]+1)
+        recent = list(events[selected])[-8:]
+        restore.update(active=True, remaining=len(recent), generation=restore["generation"]+1)
+        render_clock["next"] = 0
         restore_cover.place(x=0,y=0,relwidth=1,relheight=1)
         restore_cover.lift()
         terminal.configure(state="normal")
         terminal.delete("1.0", "end")
         terminal.configure(state="disabled")
         render_pending.clear()
-        render_pending.extend(events[selected])
+        if len(events[selected]) > len(recent):
+            append("[仅恢复最近记录，完整数据见日志]\n", "notice")
+        render_pending.extend(recent)
 
     def save_display():
         path = filedialog.asksaveasfilename(parent=root, defaultextension=".log", filetypes=[("日志", "*.log"), ("文本", "*.txt")])
@@ -572,12 +586,37 @@ def _launch(request, ensure_started, state_directory):
         frame(parent, BORDER, height=1).pack(fill="x", padx=18, pady=14)
 
     def select(component):
-        nonlocal selected, port_box, logic_workspace
+        nonlocal selected, port_box, logic_workspace, video_workspace, netvideo_workspace
+        if selected == "video" and component != "video":
+            background_request("call", {"target": "video.stop", "arguments": {}}, lambda _: None, lambda _: None)
+        if selected == "netvideo" and component != "netvideo" and netvideo_workspace is not None:
+            netvideo_workspace.stop_preview()
         selected = component
         workspace_title.configure(text="组件 / "+component_metadata.get(component,{}).get("name",{"serial":"串口监控","beken":"Beken 烧录","slogic":"逻辑分析仪"}.get(component,component)))
         nav_selected(component)
         empty_workspace.grid_remove()
         utility_host.grid_remove()
+        video_host.grid_remove()
+        netvideo_host.grid_remove()
+        if component == "netvideo":
+            main.grid_remove()
+            logic_host.grid_remove()
+            netvideo_host.grid(row=0, column=0, sticky="nsew")
+            if netvideo_workspace is None or not netvideo_workspace.winfo_exists():
+                netvideo_workspace = open_netvideo_view(netvideo_host, background_request, frame, label, button)
+                netvideo_workspace.pack(fill="both", expand=True)
+            refresh_states()
+            return
+        if component == "video":
+            main.grid_remove()
+            logic_host.grid_remove()
+            video_host.grid(row=0, column=0, sticky="nsew")
+            if video_workspace is None or not video_workspace.winfo_exists():
+                video_workspace = open_video_view(video_host, background_request, frame, label, button)
+                video_workspace.pack(fill="both", expand=True)
+            video_workspace.after_idle(video_workspace.attach_window)
+            refresh_states()
+            return
         if component not in ("serial","beken","slogic"):
             if show_utility("plugin:"+component):
                 view = open_plugin_tools(utility_host, component, background_request, frame, label, button, embedded=True)
@@ -693,6 +732,12 @@ def _launch(request, ensure_started, state_directory):
     def show_utility(name):
         main.grid_remove()
         logic_host.grid_remove()
+        if netvideo_host.grid_info() and netvideo_workspace is not None:
+            netvideo_workspace.stop_preview()
+        netvideo_host.grid_remove()
+        if video_host.grid_info():
+            background_request("call", {"target": "video.stop", "arguments": {}}, lambda _: None, lambda _: None)
+        video_host.grid_remove()
         empty_workspace.grid_remove()
         utility_host.grid(row=0,column=0,sticky="nsew")
         workspace_title.configure(text=utility_title(name))
@@ -917,6 +962,10 @@ def _launch(request, ensure_started, state_directory):
     def refresh_states():
         if logic_workspace is not None and logic_workspace.winfo_exists() and "slogic" in states:
             logic_workspace.consume_status(states["slogic"])
+        if video_workspace is not None and video_workspace.winfo_exists() and "video" in states:
+            video_workspace.consume_status(states["video"])
+        if netvideo_workspace is not None and netvideo_workspace.winfo_exists() and "netvideo" in states:
+            netvideo_workspace.consume_status(states["netvideo"])
         serial_state = states.get("serial", {})
         connected = serial_state.get("connected", False)
         connect_button.configure(state="normal" if "serial" in states else "disabled")
@@ -945,12 +994,53 @@ def _launch(request, ensure_started, state_directory):
         else:
             counter.configure(text=component_metadata.get(selected,{}).get("name",selected)+" · "+states.get(selected,{}).get("stage","等待任务"))
 
+    def component_settings(identifier):
+        if not show_utility('component-settings:'+identifier): return
+        label(utility_host, component_metadata.get(identifier,{}).get('name',identifier)+' · 组件设置',
+              font=('Microsoft YaHei UI',13,'bold')).pack(anchor='w',padx=20,pady=16)
+        label(utility_host, '组件记忆的参数（JSON 对象）；保存后用于后续操作。', muted=True).pack(anchor='w',padx=20)
+        editor=tk.Text(utility_host,bg=FIELD,fg=TEXT,insertbackground=TEXT,wrap='none',height=16)
+        editor.pack(fill='both',expand=True,padx=20,pady=12)
+        feedback=label(utility_host,'正在读取…',muted=True)
+        feedback.pack(anchor='w',padx=20)
+        scope='component.'+identifier
+        def failed(error):
+            if feedback.winfo_exists(): feedback.configure(text='设置失败：'+str(error),fg=RED)
+        def loaded(value):
+            if not editor.winfo_exists():return
+            editor.delete('1.0','end');editor.insert('1.0',json.dumps(value,ensure_ascii=False,indent=2))
+            feedback.configure(text='设置已加载')
+        def save():
+            try:
+                value=json.loads(editor.get('1.0','end-1c'))
+                if not isinstance(value,dict):raise ValueError('请填写 JSON 对象')
+            except (ValueError,TypeError) as exc:failed(exc);return
+            background_request('settings.update',{'scope':scope,'values':value},loaded,failed)
+        button(utility_host,'保存设置',save).pack(anchor='e',padx=20,pady=12)
+        background_request('settings.get',{'scope':scope},loaded,failed)
+
+    def bind_component_menu(identifier, widget):
+        menu=tk.Menu(root,tearoff=False)
+        menu.add_command(label='组件设置',command=lambda:component_settings(identifier))
+        def disable():
+            def failed(error):messagebox.showerror('无法禁用组件',str(error),parent=root)
+            background_request('plugins.set',{'id':identifier,'enabled':False},lambda result:None,failed)
+        menu.add_command(label='禁用组件',command=disable)
+        def popup(event):
+            try:menu.tk_popup(event.x_root,event.y_root)
+            finally:menu.grab_release()
+            return 'break'
+        widget.bind('<Button-3>',popup,add='+')
+        widget._nexus_context_menu=menu
+
+    for identifier,widget in tabs.items():bind_component_menu(identifier,widget)
     known_enabled = None
     def sync_components():
-        nonlocal known_enabled, logic_workspace
+        nonlocal known_enabled, logic_workspace, video_workspace
         for identifier in states:
             if identifier not in tabs:
                 tabs[identifier] = rail_button(activity_components, "◇\n"+identifier[:8], lambda c=identifier:select(c))
+                bind_component_menu(identifier,tabs[identifier])
         enabled = tuple(key for key in tabs if key in states)
         if enabled == known_enabled: return
         first_load = known_enabled is None
@@ -967,6 +1057,10 @@ def _launch(request, ensure_started, state_directory):
         if "slogic" not in enabled and logic_workspace is not None:
             if logic_workspace.winfo_exists(): logic_workspace.destroy()
             logic_workspace = None
+        if "video" not in enabled and video_workspace is not None:
+            if video_workspace.winfo_exists(): video_workspace.destroy()
+            video_workspace = None
+            video_host.grid_remove()
         desired = saved.get("selected") if first_load else None
         if desired in enabled and desired != selected: select(desired)
         elif selected not in enabled:
@@ -974,11 +1068,13 @@ def _launch(request, ensure_started, state_directory):
             else:
                 main.grid_remove()
                 logic_host.grid_remove()
+                video_host.grid_remove()
                 empty_workspace.grid(row=0,column=0,sticky="nsew")
                 workspace_title.configure(text="工作区 / 暂无启用组件")
         if utility_open:
             main.grid_remove()
             logic_host.grid_remove()
+            video_host.grid_remove()
             empty_workspace.grid_remove()
             utility_host.grid(row=0,column=0,sticky="nsew")
             workspace_title.configure(text=utility_title(utility_page["name"]))
@@ -1058,10 +1154,17 @@ def _launch(request, ensure_started, state_directory):
                 callback = callbacks[0 if succeeded else 1]
                 if callback: callback(result)
                 if stopped.is_set(): return
+        now = time.perf_counter()
+        if now < render_clock["next"]: return
+        render_clock["next"] = now + .05
+        if not restore["active"] and len(render_pending) > 120:
+            skipped = len(render_pending) - 120
+            for _ in range(skipped): render_pending.popleft()
+            append(f"\n[显示跳过 {skipped} 条积压记录，完整数据见日志]\n", "notice")
         chunks = []
         characters = 0
         deadline = time.perf_counter() + .008
-        while render_pending and len(chunks) < 80 and characters < 65536 and time.perf_counter() < deadline:
+        while render_pending and len(chunks) < 4 and characters < 4096 and time.perf_counter() < deadline:
             value = event_text(render_pending.popleft())
             if restore["active"]: restore["remaining"] = max(0,restore["remaining"]-1)
             if value:
@@ -1119,8 +1222,12 @@ def _launch(request, ensure_started, state_directory):
         closing = True
         def finish(_=None):
             finish_window()
-        save_preferences(finish)
-        if not stopped.is_set(): root.after(1000, finish)
+        if selected == "video" and "video" in states:
+            background_request("call", {"target": "video.stop", "arguments": {}},
+                               lambda _: save_preferences(finish), lambda _: save_preferences(finish))
+        else:
+            save_preferences(finish)
+        if not stopped.is_set(): root.after(2000, finish)
     root.protocol("WM_DELETE_WINDOW", close_window)
     select(saved.get("selected") if saved.get("selected") in ("serial", "beken") else "serial")
     threading.Thread(target=poll, daemon=True).start()

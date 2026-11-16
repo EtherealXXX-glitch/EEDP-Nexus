@@ -14,15 +14,26 @@ def main():
     target = (ROOT / "dist/EEDP Nexus").resolve()
     if not target.is_relative_to(ROOT.resolve()) or (target / ".state").exists():
         raise RuntimeError("Refusing to overwrite a live application or a path outside this workspace")
+    if not (ROOT / "plugins/video/bin/mpv.exe").is_file():
+        raise FileNotFoundError("Place the documented mpv.exe in plugins/video/bin before building")
     subprocess.run([sys.executable, str(ROOT / "build_assets.py")], check=True)
     subprocess.run([sys.executable, str(ROOT / "build_sidebar_icons.py")], check=True)
     subprocess.run([sys.executable, str(ROOT / "build_button_assets.py")], check=True)
     subprocess.run([sys.executable, str(ROOT / "check-components.py")], check=True)
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", str(ROOT / "eedp-agent.spec")], cwd=ROOT, check=True,
                    env={**os.environ, "PYTHONUTF8":"1"})
+    # Build the JPEG helper from tracked source; never commit its generated runtime.
+    subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--onedir",
+                    "--name", "eedp-jpeg", "--distpath", str(ROOT / "build/jpeg-helper"),
+                    "--workpath", str(ROOT / "build/jpeg-helper-work"),
+                    "--specpath", str(ROOT / "build"), str(ROOT / "plugins/netvideo/jpeg_helper.py")],
+                   cwd=ROOT, check=True, env={**os.environ, "PYTHONUTF8":"1"})
     distribution = ROOT / "dist/EEDP Nexus"
     shutil.copytree(ROOT / "plugins", distribution / "plugins", dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    helper_destination = distribution / "plugins/netvideo/bin/eedp-jpeg"
+    if helper_destination.exists(): shutil.rmtree(helper_destination)
+    shutil.copytree(ROOT / "build/jpeg-helper/eedp-jpeg", helper_destination)
     shutil.copytree(ROOT / "component-plans", distribution / "component-plans", dirs_exist_ok=True)
     engine = Path(os.environ.get("EEDP_BEKEN_ENGINE",str(ROOT / "plugins/beken/bin/bk_loader.exe")))
     if not engine.is_file(): raise FileNotFoundError("Place the vendor bk_loader.exe in plugins/beken/bin or set EEDP_BEKEN_ENGINE")
@@ -41,6 +52,7 @@ def main():
     shutil.copy2(ROOT / "PLUGIN-API.md", distribution / "插件开发说明.md")
     shutil.copy2(ROOT / "COMPONENT-STANDARD.md", distribution / "组件开发标准手册.md")
     shutil.copy2(ROOT / "GETTING-STARTED.md", distribution / "GETTING-STARTED.md")
+    shutil.copy2(ROOT / "NETVIDEO-PROTOCOL.md", distribution / "NETVIDEO-PROTOCOL.md")
     shutil.copy2(ROOT / "SKILL.md", distribution / "SKILL.md")
     shutil.copy2(ROOT / "AGENTS.md", distribution / "AGENTS.md")
     (distribution / "使用说明.txt").write_text(

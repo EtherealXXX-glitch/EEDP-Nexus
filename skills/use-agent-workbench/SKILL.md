@@ -53,7 +53,7 @@ If Windows interop is disabled, report that dependency rather than changing WSL 
 
 `tools` returns the currently installed components, actions, parameters, defaults and mutation markers.
 Discover the current schema instead of assuming every planned component exists.
-Current components are `serial`, `beken`, and `slogic`; generic desktop control, file browsing and arbitrary Linux execution
+Current components are `serial`, `beken`, `slogic`, and `video`; generic desktop control, file browsing and arbitrary Linux execution
 are not implemented by this workbench yet. Access files with existing environment tools when needed.
 
 ## Calling components
@@ -91,6 +91,9 @@ The vendor engine must live on a Windows drive. Preflight can report the tempora
 arguments file, not a copied `inspect.command`, and compare the firmware SHA-256.
 Do not transform ordinary serial command strings into paths. The desktop can explicitly save named command presets locally; selecting one only loads it. Its command-line and HEX modes are mutually exclusive. `serial.send` defaults to CRLF for text and accepts CR, LF or NONE; HEX sends exactly the supplied bytes without an appended ending.
 The desktop port list displays the OS-reported description, such as CH340, while connecting using the original COM port name.
+
+The `video` component plays in the desktop video view using mpv. Open that view before `video.play`; call `video.status` and use `video.pause`, `video.seek`, `video.volume`, or `video.stop` as needed. Inputs are Windows paths or supported network URLs. Raw YUV requires explicit dimensions, pixel format, and frame rate; raw H.264, MJPEG and MPEG-TS can be selected. UDP carrying a custom protocol requires a protocol-specific adapter; RTP may require SDP. Do not put credentials or sensitive tokens in URLs, which are logged.
+
 
 ## Resource and task behavior
 
@@ -177,3 +180,13 @@ releases resources; do not use it merely to finish reading logs. Logs and per-fl
 `.state/logs` directory. Do not print the `.state/endpoint.json` access token.
 
 Skill installation makes this capability discoverable; it does not grant extra OS privileges or authorize all device operations.
+
+Receive display: at most 20 refreshes/sec, bounded batches and a 100,000-character view cache. Repeated NUL bytes are condensed; long lines are split. Overload skips old display entries with a notice. Raw backend events remain unchanged; pause only pauses display.
+
+## Network video sender
+
+Discover netvideo.prepare/start/status/stop. prepare is asynchronous and offline: supply lane mjpeg/h264, source, trusted FFmpeg executable engine, duration_s (1–120). Wait for succeeded before start. start sends real TCP data to an explicitly authorized board IP (default ports 5001/5002); never use as a connectivity probe. Two lanes are independent. stop accepts a lane or all; wait for resource release before disabling. First release normalizes media through FFmpeg and rejects oversized frames after bounded JPEG recompression. H.264 uses AUD-delimited AUs, repeated SPS/PPS, no B frames, and a sliding payload budget; network statistics do not prove receiver playback. WSL source/engine must reside on a Windows drive (for example /mnt/c/...); Linux-private files must be copied there first. No board CLI commands are issued automatically.
+
+MJPEG preparation uses the bundled Pillow/libjpeg helper and verifies each JPEG is 1024×608 with SOF sampling factors 21/11/11. Re-prepare old cached frames after updating the component.
+
+For pre-generated raw `.mjpeg` files, `mjpeg_passthrough=true` validates frames without FFmpeg; container input still needs FFmpeg. The video workspace shows both lanes, offers one-click playback and quality switches, and reports sender-side rates rather than receiver measurements.

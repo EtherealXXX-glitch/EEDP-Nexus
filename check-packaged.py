@@ -29,7 +29,9 @@ def main():
         return json.loads(p.stdout)
     try:
         tools = cli("tools")
-        assert {t["id"] for t in tools} == {"serial", "beken", "slogic"}, tools
+        assert {t["id"] for t in tools} == {"serial", "beken", "slogic", "video", "netvideo"}, tools
+        video = cli("call", "video.status")
+        assert video["engine_available"] and video["state"] == "idle", video
         decoder=cli("call","slogic.decoder","--args",json.dumps({"name":"uart"}))
         assert "UART" in decoder["raw"]
         cli("call", "serial.connect", "--args", json.dumps(dict(port="loop://", baudrate=1500000)))
