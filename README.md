@@ -36,7 +36,7 @@ Windows 免安装程序：`release/EEDP-Nexus-v0.5.0/EEDP Nexus.exe`；发布 ZI
 高对比方案对主要文字、按钮及边界执行计算对比度测试，以 [WCAG 对比度说明](https://www.w3.org/WAI/WCAG22/Understanding/contrast-enhanced) 为设计参考，不宣称完整软件认证。
 主题通过 themes.py 统一管理，供现有和未来组件继承，不改变采集、串口、烧录或后台服务。
 
-MCU 多功能控制器仅在 component-plans/ 预留，覆盖 GPIO 输入/输出、ADC、DAC、UART、SPI、PWM 和自定义扩展方向；当前不实现、不连接硬件、不暴露可调用动作。
+MCU 多功能控制器仅在 component-plans/ 预留，当前不实现、不连接硬件、不暴露可调用动作。自动化开发及工具板的分阶段方向见 [单片机自动化开发路线](MCU-AUTOMATION-PLAN.md)：先用现成工具开发手头的 STM32F407，再逐步扩展为可由 Agent 控制的硬件节点。
 
 ## 结构
 
