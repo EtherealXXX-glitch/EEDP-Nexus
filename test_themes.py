@@ -1,5 +1,6 @@
 import gc
 import tkinter as tk
+from tkinter import ttk
 import unittest
 
 from themes import ThemeManager, THEMES, contrast, color
@@ -44,6 +45,25 @@ class ThemesTest(unittest.TestCase):
             manager.apply()
             self.assertEqual(action.cget("text"),"➤  发送")
             self.assertEqual(manager.settings()["button_size"],12)
+        finally:root.destroy()
+
+    def test_video_controls_follow_all_palettes(self):
+        root=tk.Tk(); root.withdraw()
+        manager=ThemeManager(root,{})
+        try:
+            for name, palette in THEMES.items():
+                manager.select(name)
+                style=ttk.Style(root)
+                self.assertEqual(style.lookup("Nexus.TNotebook", "background"), palette["panel"])
+                self.assertEqual(style.lookup("Nexus.TNotebook.Tab", "background", ("selected",)), palette["primary"])
+                self.assertEqual(style.lookup("NexusVideo.TNotebook.Tab", "background", ("selected",)), palette["primary"])
+                self.assertEqual(style.lookup("NexusVideo.TNotebook.Tab", "foreground", ("selected",)), palette["primary_text"])
+                self.assertNotEqual(style.lookup("NexusVideo.TNotebook.Tab", "padding", ("selected",)),
+                                    style.lookup("NexusVideo.TNotebook.Tab", "padding", ("!selected",)))
+                self.assertEqual(style.lookup("Nexus.TEntry", "fieldbackground"), palette["field"])
+                self.assertEqual(style.lookup("Nexus.TEntry", "foreground"), palette["text"])
+                self.assertEqual(style.lookup("Nexus.TCheckbutton", "background"), palette["panel"])
+                self.assertEqual(style.lookup("Nexus.TCheckbutton", "foreground"), palette["text"])
         finally:root.destroy()
 
     def test_canvas_redraw_uses_current_palette(self):

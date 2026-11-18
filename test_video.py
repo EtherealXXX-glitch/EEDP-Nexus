@@ -10,7 +10,7 @@ import uuid
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location("video_component_test", ROOT / "plugins/video/component.py")
+spec = importlib.util.spec_from_file_location("video_component_test", ROOT / "plugins/netvideo/preview.py")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
@@ -24,7 +24,7 @@ class VideoTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "Windows window handles")
     def test_raw_video_arguments_and_owned_process(self):
-        self.video.engine = ROOT / "plugins/video/bin/mpv.exe"
+        self.video.engine = ROOT / "plugins/netvideo/bin/mpv.exe"
         if not self.video.engine.is_file(): self.skipTest("local mpv engine not installed")
         self.video.window_id = 123
         process = Mock()
@@ -40,7 +40,7 @@ class VideoTests(unittest.TestCase):
             process.terminate.assert_called_once()
 
     def test_invalid_inputs_are_rejected_without_starting(self):
-        self.video.engine = ROOT / "plugins/video/bin/mpv.exe"
+        self.video.engine = ROOT / "plugins/netvideo/bin/mpv.exe"
         if not self.video.engine.is_file(): self.skipTest("local mpv engine not installed")
         with self.assertRaisesRegex(ValueError, "帧率"):
             self.video.play("udp://127.0.0.1:12345", format="rawvideo", fps=0)
@@ -48,7 +48,7 @@ class VideoTests(unittest.TestCase):
             self.video.play("https://name:password@example.com/video")
 
     def test_decode_samples_without_window(self):
-        engine = ROOT / "plugins/video/bin/mpv.exe"
+        engine = ROOT / "plugins/netvideo/bin/mpv.exe"
         if not engine.is_file(): self.skipTest("local mpv engine not installed")
         samples = [
             ("video-test.h264", ["--demuxer-lavf-format=h264"]),

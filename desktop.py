@@ -18,7 +18,6 @@ from log_store import diagnostic_path
 from log_center import open_log_center
 from plugin_tools import open_plugin_tools
 from logic_view import open_logic_view
-from video_view import open_video_view
 from netvideo_view import open_netvideo_view
 from themes import ThemeManager
 from buttons import ActionButton
@@ -258,14 +257,12 @@ def _launch(request, ensure_started, state_directory):
     workspace_body.rowconfigure(0,weight=1)
     workspace_body.columnconfigure(0,weight=1)
     logic_host = frame(workspace_body, BG)
-    video_host = frame(workspace_body, BG)
     netvideo_host = frame(workspace_body, BG)
     utility_host = frame(workspace_body, PANEL)
     utility_page = {"name":None, "refresh":None}
     empty_workspace = frame(workspace_body, BG)
     label(empty_workspace, "没有启用的组件\n从右侧组件管理安装或启用工具", muted=True, justify="center").pack(expand=True)
     logic_workspace = None
-    video_workspace = None
     netvideo_workspace = None
 
     def rail_button(parent, text, command, icon="blocks"):
@@ -586,9 +583,7 @@ def _launch(request, ensure_started, state_directory):
         frame(parent, BORDER, height=1).pack(fill="x", padx=18, pady=14)
 
     def select(component):
-        nonlocal selected, port_box, logic_workspace, video_workspace, netvideo_workspace
-        if selected == "video" and component != "video":
-            background_request("call", {"target": "video.stop", "arguments": {}}, lambda _: None, lambda _: None)
+        nonlocal selected, port_box, logic_workspace, netvideo_workspace
         if selected == "netvideo" and component != "netvideo" and netvideo_workspace is not None:
             netvideo_workspace.stop_preview()
         selected = component
@@ -596,7 +591,6 @@ def _launch(request, ensure_started, state_directory):
         nav_selected(component)
         empty_workspace.grid_remove()
         utility_host.grid_remove()
-        video_host.grid_remove()
         netvideo_host.grid_remove()
         if component == "netvideo":
             main.grid_remove()
@@ -605,16 +599,6 @@ def _launch(request, ensure_started, state_directory):
             if netvideo_workspace is None or not netvideo_workspace.winfo_exists():
                 netvideo_workspace = open_netvideo_view(netvideo_host, background_request, frame, label, button)
                 netvideo_workspace.pack(fill="both", expand=True)
-            refresh_states()
-            return
-        if component == "video":
-            main.grid_remove()
-            logic_host.grid_remove()
-            video_host.grid(row=0, column=0, sticky="nsew")
-            if video_workspace is None or not video_workspace.winfo_exists():
-                video_workspace = open_video_view(video_host, background_request, frame, label, button)
-                video_workspace.pack(fill="both", expand=True)
-            video_workspace.after_idle(video_workspace.attach_window)
             refresh_states()
             return
         if component not in ("serial","beken","slogic"):
@@ -735,9 +719,6 @@ def _launch(request, ensure_started, state_directory):
         if netvideo_host.grid_info() and netvideo_workspace is not None:
             netvideo_workspace.stop_preview()
         netvideo_host.grid_remove()
-        if video_host.grid_info():
-            background_request("call", {"target": "video.stop", "arguments": {}}, lambda _: None, lambda _: None)
-        video_host.grid_remove()
         empty_workspace.grid_remove()
         utility_host.grid(row=0,column=0,sticky="nsew")
         workspace_title.configure(text=utility_title(name))
@@ -962,8 +943,6 @@ def _launch(request, ensure_started, state_directory):
     def refresh_states():
         if logic_workspace is not None and logic_workspace.winfo_exists() and "slogic" in states:
             logic_workspace.consume_status(states["slogic"])
-        if video_workspace is not None and video_workspace.winfo_exists() and "video" in states:
-            video_workspace.consume_status(states["video"])
         if netvideo_workspace is not None and netvideo_workspace.winfo_exists() and "netvideo" in states:
             netvideo_workspace.consume_status(states["netvideo"])
         serial_state = states.get("serial", {})
@@ -1036,7 +1015,7 @@ def _launch(request, ensure_started, state_directory):
     for identifier,widget in tabs.items():bind_component_menu(identifier,widget)
     known_enabled = None
     def sync_components():
-        nonlocal known_enabled, logic_workspace, video_workspace
+        nonlocal known_enabled, logic_workspace
         for identifier in states:
             if identifier not in tabs:
                 tabs[identifier] = rail_button(activity_components, "◇\n"+identifier[:8], lambda c=identifier:select(c))
@@ -1057,10 +1036,6 @@ def _launch(request, ensure_started, state_directory):
         if "slogic" not in enabled and logic_workspace is not None:
             if logic_workspace.winfo_exists(): logic_workspace.destroy()
             logic_workspace = None
-        if "video" not in enabled and video_workspace is not None:
-            if video_workspace.winfo_exists(): video_workspace.destroy()
-            video_workspace = None
-            video_host.grid_remove()
         desired = saved.get("selected") if first_load else None
         if desired in enabled and desired != selected: select(desired)
         elif selected not in enabled:
@@ -1068,13 +1043,11 @@ def _launch(request, ensure_started, state_directory):
             else:
                 main.grid_remove()
                 logic_host.grid_remove()
-                video_host.grid_remove()
                 empty_workspace.grid(row=0,column=0,sticky="nsew")
                 workspace_title.configure(text="工作区 / 暂无启用组件")
         if utility_open:
             main.grid_remove()
             logic_host.grid_remove()
-            video_host.grid_remove()
             empty_workspace.grid_remove()
             utility_host.grid(row=0,column=0,sticky="nsew")
             workspace_title.configure(text=utility_title(utility_page["name"]))
@@ -1222,11 +1195,9 @@ def _launch(request, ensure_started, state_directory):
         closing = True
         def finish(_=None):
             finish_window()
-        if selected == "video" and "video" in states:
-            background_request("call", {"target": "video.stop", "arguments": {}},
-                               lambda _: save_preferences(finish), lambda _: save_preferences(finish))
-        else:
-            save_preferences(finish)
+        if netvideo_workspace is not None and netvideo_workspace.winfo_exists():
+            netvideo_workspace.stop_preview()
+        save_preferences(finish)
         if not stopped.is_set(): root.after(2000, finish)
     root.protocol("WM_DELETE_WINDOW", close_window)
     select(saved.get("selected") if saved.get("selected") in ("serial", "beken") else "serial")

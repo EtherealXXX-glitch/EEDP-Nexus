@@ -28,16 +28,16 @@ class DesktopTemp(tempfile.TemporaryDirectory):
 
 
 class DesktopTest(unittest.TestCase):
-    def test_video_workspace_attaches_embedded_surface(self):
+    def test_netvideo_workspace_opens_without_autoplay(self):
         original = tk.Tk
         failures, calls = [], []
         def request(method, args=None):
             if method == "settings.get": return {}
             if method == "settings.update": return args["values"]
-            if method == "status": return {"components": {"video": {"state": "idle", "playing": False}}}
+            if method == "status": return {"components": {"netvideo": {"state": "idle", "lanes": {}, "prepared": {}}}}
             if method == "events": return dict(events=[], cursor=0, dropped=False)
-            if method == "tools": return [dict(id="video", name="视频播放")]
-            if method == "plugins.list": return [dict(id="video", name="视频播放", version="1.0.0", enabled=True)]
+            if method == "tools": return [dict(id="netvideo", name="双路视频发送")]
+            if method == "plugins.list": return [dict(id="netvideo", name="双路视频发送", version="0.2.0", enabled=True)]
             if method == "call":
                 calls.append(args)
                 return {"state": "idle", "playing": False}
@@ -55,7 +55,7 @@ class DesktopTest(unittest.TestCase):
                 try:
                     widgets = list(descendants(self))
                     if not any(isinstance(w, tk.Button) and w.cget("text") == "播放" for w in widgets): raise AssertionError("video view not opened")
-                    if not any(call.get("target") == "video.attach" and call["arguments"].get("window_id", 0) > 0 for call in calls): raise AssertionError("video surface not attached")
+                    if any(call.get("target") in ("netvideo.preview_play", "netvideo.start") for call in calls): raise AssertionError("workspace should not autoplay")
                 except Exception as exc: failures.append(exc)
                 self.finish()
             def finish(self):

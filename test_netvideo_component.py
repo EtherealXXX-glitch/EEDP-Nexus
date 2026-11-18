@@ -27,11 +27,30 @@ class NetworkVideoTests(unittest.TestCase):
                 result=component.status()
                 self.assertEqual(result['lanes']['mjpeg']['state'],'succeeded',result)
                 self.assertEqual(result['prepared']['mjpeg']['frames'],12)
+                preview=Path(result['prepared']['mjpeg']['preview_path'])
+                self.assertTrue(preview.is_file(), 'raw MJPEG preview must survive snapshot cleanup')
+                self.assertEqual(preview.read_bytes(),frame*12)
                 bad=Path(tmp)/'bad.mjpeg';bad.write_bytes(b'\xff\xd8invalid\xff\xd9')
                 component.prepare('mjpeg',str(bad),'',1,mjpeg_passthrough=True)
                 until=time.monotonic()+5
                 while component.status()['state']=='running' and time.monotonic()<until:time.sleep(.01)
                 self.assertEqual(component.status()['lanes']['mjpeg']['state'],'failed')
+            finally:component.close();activity.close()
+
+    def test_raw_mjpeg_explicit_15_fps_preserves_duration(self):
+        with tempfile.TemporaryDirectory(dir=ROOT/'build') as tmp:
+            activity=Activity(Path(tmp)/'logs');component=module.NetworkVideo(activity,Resources())
+            frame=bytes.fromhex('ffd8 ffc0 0011 08 0260 0400 03 012100 021100 031100 ffd9')
+            source=Path(tmp)/'sample.mjpeg';source.write_bytes(frame*16)
+            try:
+                component.prepare('mjpeg',str(source),'',1,mjpeg_passthrough=True,mjpeg_fps=15)
+                until=time.monotonic()+5
+                while component.status()['state']=='running' and time.monotonic()<until:time.sleep(.01)
+                result=component.status()
+                self.assertEqual(result['lanes']['mjpeg']['state'],'succeeded',result)
+                self.assertEqual(result['prepared']['mjpeg']['fps'],15)
+                self.assertEqual(result['prepared']['mjpeg']['frames'],15)
+                self.assertEqual(Path(result['prepared']['mjpeg']['preview_path']).read_bytes(),frame*15)
             finally:component.close();activity.close()
 
     def test_paced_packet_preserves_bytes_and_honours_stop(self):
@@ -115,7 +134,7 @@ class NetworkVideoTests(unittest.TestCase):
             activity=Activity(Path(tmp)/'logs');component=module.NetworkVideo(activity,Resources())
             try:
                 for lane in ('mjpeg','h264'):
-                    component.prepare(lane,str(source),str(engine),1,jpeg_limit_kib=40)
+                    component.prepare(lane,str(source),str(engine),1,jpeg_limit_kib=40,h264_kbps=320)
                     until=time.monotonic()+30
                     while component.status()['state']=='running' and time.monotonic()<until:time.sleep(.05)
                     status=component.status()
@@ -129,7 +148,8 @@ class NetworkVideoTests(unittest.TestCase):
                                 size=struct.unpack('>I',stream.read(4))[0]
                                 self.assertEqual(module.jpeg_format(stream.read(size)),(1024,608,(0x21,0x11,0x11)))
                     else:
-                        self.assertLessEqual(status['prepared'][lane]['peak_1s_bytes'],61440)
+                        self.assertLessEqual(status['prepared'][lane]['peak_1s_bytes'],40000)
+                        self.assertEqual(status['prepared'][lane]['h264_kbps'],320)
             finally:component.close();activity.close()
 
     def test_loopback_two_frames_and_resource_release(self):

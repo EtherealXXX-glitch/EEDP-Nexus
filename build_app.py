@@ -14,7 +14,7 @@ def main():
     target = (ROOT / "dist/EEDP Nexus").resolve()
     if not target.is_relative_to(ROOT.resolve()) or (target / ".state").exists():
         raise RuntimeError("Refusing to overwrite a live application or a path outside this workspace")
-    if not (ROOT / "plugins/video/bin/mpv.exe").is_file():
+    if not (ROOT / "plugins/netvideo/bin/mpv.exe").is_file():
         raise FileNotFoundError("Place the documented mpv.exe in plugins/video/bin before building")
     subprocess.run([sys.executable, str(ROOT / "build_assets.py")], check=True)
     subprocess.run([sys.executable, str(ROOT / "build_sidebar_icons.py")], check=True)

@@ -3,6 +3,7 @@ import collections
 import copy
 import hashlib
 import ipaddress
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -16,6 +17,11 @@ import uuid
 from core import field
 
 LIMIT=61440
+
+# 预览属于双路视频组件，不再依赖独立 video 插件。
+_preview_spec = importlib.util.spec_from_file_location('eedp_netvideo_preview', Path(__file__).with_name('preview.py'))
+_preview_module = importlib.util.module_from_spec(_preview_spec)
+_preview_spec.loader.exec_module(_preview_module)
 
 
 def send_paced(conn, packet, stop, pacing_ms):
@@ -90,6 +96,7 @@ def arguments():
             field('duration_s','预处理长度秒（最多300）',30,kind='int'),
             field('mjpeg_passthrough','直发已符合规格的 MJPEG',False,kind='bool',remember=False),
             field('h264_passthrough','直发已符合规格的 H.264',False,kind='bool',remember=False),
+            field('mjpeg_fps','MJPEG 帧率（1–15）',12,kind='int'),
             field('jpeg_quality','JPEG 质量（0 自动，10–95 手动）',0,kind='int'),
             field('jpeg_limit_kib','JPEG 单帧上限（10–60 KiB）',60,kind='int'),
             field('h264_auto','自动优化 H.264 画质',True,kind='bool'),
@@ -109,7 +116,11 @@ class NetworkVideo:
             field('port','端口（0=默认5001/5002）',0,kind='int'),field('loop','循环发送',True,kind='bool'),
             field('exclusive','两路互斥',True,kind='bool'),
             field('mjpeg_pacing_ms','MJPEG 分块发送时间（0–70 毫秒）',0,kind='int')]),
-        'stop':dict(label='停止通道',read_only=False,destructive=True,fields=[field('lane','通道','all',['all','mjpeg','h264'])])}
+        'stop':dict(label='停止通道',read_only=False,destructive=True,fields=[field('lane','通道','all',['all','mjpeg','h264'])]),
+        'preview_attach':dict(label='绑定预览窗口',read_only=False,destructive=False,fields=_preview_module.VideoPlayer.actions['attach']['fields']),
+        'preview_play':dict(label='预览素材',read_only=False,destructive=False,fields=_preview_module.VideoPlayer.actions['play']['fields']),
+        'preview_stop':dict(label='停止预览',read_only=False,destructive=False,fields=[]),
+        'preview_status':dict(label='预览状态',read_only=True,destructive=False,fields=[])}
 
     def __init__(self,activity,resources):
         self.activity,self.resources=activity,resources
@@ -118,6 +129,7 @@ class NetworkVideo:
         self.controls={}
         self.ready={}
         self.cache=activity.directory.parent/'runtime/netvideo'
+        self.preview=_preview_module.VideoPlayer(activity,resources)
 
     def status(self):
         with self.lock:
@@ -127,7 +139,7 @@ class NetworkVideo:
                 job['average_fps']=round(job['frames']/elapsed,2)
                 job['average_payload_bytes_s']=round(job['payload_bytes']/elapsed,2)
             return dict(state='running' if any(j['state']=='running' for j in self.jobs.values()) else 'idle',
-                        lanes=lanes,prepared=copy.deepcopy(self.ready))
+                        lanes=lanes,prepared=copy.deepcopy(self.ready), capabilities={'h264_selected_peak_limit': True})
 
     def _launch(self,lane,stage,worker,operation='prepare',exclusive=False):
         if lane not in ('mjpeg','h264'):raise ValueError('Unknown lane')
@@ -153,10 +165,11 @@ class NetworkVideo:
             thread.start()
         return self.status()
 
-    def prepare(self,lane='mjpeg',source='',engine='',duration_s=30,mjpeg_passthrough=False,jpeg_quality=0,jpeg_limit_kib=60,h264_auto=True,h264_kbps=480,h264_preset='medium',h264_passthrough=False):
+    def prepare(self,lane='mjpeg',source='',engine='',duration_s=30,mjpeg_passthrough=False,jpeg_quality=0,jpeg_limit_kib=60,h264_auto=True,h264_kbps=480,h264_preset='medium',h264_passthrough=False,mjpeg_fps=12):
         if lane not in ('mjpeg','h264') or not 1<=duration_s<=300:raise ValueError('Invalid lane or duration')
         if mjpeg_passthrough and lane!='mjpeg':raise ValueError('MJPEG passthrough requires mjpeg lane')
         if h264_passthrough and lane!='h264':raise ValueError('H264 passthrough requires h264 lane')
+        if not isinstance(mjpeg_fps,int) or not 1 <= mjpeg_fps <= 15:raise ValueError('MJPEG fps must be 1–15')
         if jpeg_quality != 0 and not 10 <= jpeg_quality <= 95:raise ValueError('JPEG quality must be 0 or 10–95')
         if not 10 <= jpeg_limit_kib <= 60:raise ValueError('JPEG frame limit must be 10–60 KiB')
         if not 32 <= h264_kbps <= 480:raise ValueError('H264 bitrate must be 32–480 kbps')
@@ -173,7 +186,8 @@ class NetworkVideo:
             normalized=self.cache/(token+'.jpeg')
             prepared=self.cache/(token+'.frames')
             preview=self.cache/(token+('.mjpeg' if lane=='mjpeg' else '.h264'))
-            snapshot=self.cache/(token+source.suffix)
+            # Keep the input snapshot distinct from the playback preview for raw sources.
+            snapshot=self.cache/(token+'.input'+source.suffix)
             if source.stat().st_size>256*1024**2:raise ValueError('Source exceeds 256 MiB preparation limit')
             digest=hashlib.sha256()
             with source.open('rb') as stream, snapshot.open('xb') as saved:
@@ -186,13 +200,17 @@ class NetworkVideo:
                     digest.update(chunk)
             try:
                 # MJPEG copy mode accepts existing JPEG only after per-frame validation below.
-                codec_args=(['-vf','scale=1024:608,fps=12','-c:v','mjpeg','-pix_fmt','yuvj422p','-q:v','2','-f','mjpeg']
+                codec_args=(['-vf',f'scale=1024:608,fps={mjpeg_fps}','-c:v','mjpeg','-pix_fmt','yuvj422p','-q:v','2','-f','mjpeg']
                             if lane=='mjpeg' and not mjpeg_passthrough else ['-c:v','copy','-f','mjpeg']
                             if lane=='mjpeg' else ['-vf','scale=640:360,fps=12','-c:v','libx264','-pix_fmt','yuv420p','-profile:v','baseline',
                             '-preset',h264_preset,'-tune','zerolatency','-bf','0','-g','12','-keyint_min','12',
                             '-b:v',f'{h264_kbps}k','-maxrate',f'{min(480, h264_kbps*5//4)}k','-bufsize','24k','-x264-params','aud=1:repeat-headers=1:scenecut=0','-f','h264'])
                 def encode(options):
-                    command=[str(engine.resolve()),'-nostdin','-hide_banner','-loglevel','error','-y','-i',str(snapshot),
+                    input_args=[]
+                    if lane=='mjpeg' and not mjpeg_passthrough and source.suffix.lower()=='.mjpeg':
+                        source_rate=re.search(r'(?i)(12|15)fps',source.name)
+                        input_args=['-f','mjpeg','-framerate',source_rate.group(1) if source_rate else str(mjpeg_fps)]
+                    command=[str(engine.resolve()),'-nostdin','-hide_banner','-loglevel','error','-y',*input_args,'-i',str(snapshot),
                              '-t',str(duration_s),'-an','-threads','1',*options,str(raw)]
                     with self.lock:self.jobs[lane]['command']=command
                     with subprocess.Popen(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)) as process:
@@ -203,6 +221,7 @@ class NetworkVideo:
                         if process.returncode:raise ValueError('FFmpeg conversion failed; check source and encoder support')
                 chosen_crf=None
                 peak_bytes=None
+                h264_budget=min(LIMIT, h264_kbps * 1000 // 8)
                 if lane=='h264' and h264_passthrough:
                     probe=subprocess.run([str(engine.resolve()),'-hide_banner','-i',str(snapshot)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)).stderr.decode('utf-8','replace')
                     if not re.search(r'Video: h264 \((?:Constrained )?Baseline\).*?640x360.*?12 fps',probe):
@@ -218,7 +237,7 @@ class NetworkVideo:
                     if not keys or keys[0]!=0 or any(b-a>12 for a,b in zip(keys,keys[1:])) or len(frames)-keys[-1]>12:
                         raise ValueError('H264 requires repeated SPS/PPS and an IDR at least every 12 frames')
                     peak_bytes=peak_loop_payload(frames)
-                    if peak_bytes>LIMIT or max(map(len,frames))>LIMIT:raise ValueError('H264 passthrough exceeds 60 KiB per second or frame')
+                    if peak_bytes>h264_budget or max(map(len,frames))>h264_budget:raise ValueError('H264 passthrough exceeds configured one-second payload limit')
                     raw.write_bytes(data)
                 elif lane=='h264' and h264_auto:
                     lo,hi,best=12,45,None
@@ -233,10 +252,10 @@ class NetworkVideo:
                         candidate=raw.read_bytes()
                         frames=list(units(candidate,'h264'))
                         peak=peak_loop_payload(frames)
-                        if frames and peak<=LIMIT and max(map(len,frames))<=LIMIT:
+                        if frames and peak<=h264_budget and max(map(len,frames))<=h264_budget:
                             best=(candidate,crf,peak);hi=crf-1
                         else:lo=crf+1
-                    if best is None:raise ValueError('Cannot encode H264 within 60 KiB/s; use a simpler source')
+                    if best is None:raise ValueError('Cannot encode H264 within the selected bitrate; use a simpler source or a higher rate')
                     raw.write_bytes(best[0]);chosen_crf=best[1];peak_bytes=best[2]
                 elif raw_mjpeg:
                     # Raw MJPEG contains complete JPEG units; validation below is still mandatory.
@@ -262,10 +281,10 @@ class NetworkVideo:
                 data=(normalized if lane=='mjpeg' and not mjpeg_passthrough else raw).read_bytes()
                 if raw_mjpeg:
                     # Raw MJPEG has no container timestamps: its frame sequence is
-                    # explicitly 12 fps, so limit the prepared duration by count.
+                    # Raw MJPEG has no timestamps; the configured fps determines duration.
                     end = 0
                     for index, frame in enumerate(units(data, lane)):
-                        if index >= duration_s * 12: break
+                        if index >= duration_s * mjpeg_fps: break
                         end += len(frame)
                     data = data[:end]
                 count=0;largest=0
@@ -277,6 +296,7 @@ class NetworkVideo:
                         if lane=='mjpeg' and len(frame)>jpeg_limit_kib*1024:
                             raise ValueError('JPEG frame exceeds selected limit')
                         if not 1<=len(frame)<=LIMIT:raise ValueError('Encoded frame exceeds 60 KiB; use a simpler/lower-rate source')
+                        if lane=='h264' and len(frame)>h264_budget:raise ValueError('H264 frame exceeds configured one-second payload limit')
                         if lane=='h264' and count==0 and not keyframe(frame):raise ValueError('Missing initial SPS/PPS/IDR')
                         stream.write(struct.pack('>I',len(frame)));stream.write(frame)
                         count+=1;largest=max(largest,len(frame))
@@ -284,7 +304,7 @@ class NetworkVideo:
                 preview.write_bytes(data)
                 with self.lock:
                     old=self.ready.get(lane)
-                    self.ready[lane]=dict(path=str(prepared),preview_path=str(preview),frames=count,max_frame_bytes=largest,recompressed_frames=recompressed,source=str(source.resolve()),sha256=digest.hexdigest(),fps=12,chosen_crf=chosen_crf,peak_1s_bytes=peak_bytes,jpeg_limit_kib=jpeg_limit_kib if lane=='mjpeg' else None,h264_passthrough=h264_passthrough if lane=='h264' else False)
+                    self.ready[lane]=dict(path=str(prepared),preview_path=str(preview),frames=count,max_frame_bytes=largest,recompressed_frames=recompressed,source=str(source.resolve()),sha256=digest.hexdigest(),fps=mjpeg_fps if lane=='mjpeg' else 12,chosen_crf=chosen_crf,peak_1s_bytes=peak_bytes,jpeg_limit_kib=jpeg_limit_kib if lane=='mjpeg' else None,h264_passthrough=h264_passthrough if lane=='h264' else False,h264_kbps=h264_kbps if lane=='h264' else None)
                 if old:
                     for previous in (old['path'], old.get('preview_path')):
                         if previous:
@@ -314,6 +334,7 @@ class NetworkVideo:
             self.resources.acquire(resource,self.id)
             budget=collections.deque()
             frame_budget=collections.deque()
+            fps=prepared.get('fps',12) if lane=='mjpeg' else 12
             try:
                 while not stop.is_set():
                     try:
@@ -328,17 +349,17 @@ class NetworkVideo:
                                         frame=stream.read(size)
                                         if len(frame)!=size:raise ValueError('Truncated prepared frame')
                                         if stop.wait(max(0,due-time.monotonic())):return
-                                        # Keep at most 12 frame starts in any rolling second.
+                                        # Limit starts to the configured rate in any rolling second.
                                         while True:
                                             now=time.monotonic()
                                             while frame_budget and now-frame_budget[0]>=1.0:frame_budget.popleft()
-                                            if len(frame_budget)<12:break
+                                            if len(frame_budget)<fps:break
                                             if stop.wait(max(0.001,1.0-(now-frame_budget[0]))):return
                                         if lane=='h264':
                                             while True:
                                                 now=time.monotonic()
                                                 while budget and now-budget[0][0]>1.001:budget.popleft()
-                                                if sum(n for _,n in budget)+size<=LIMIT:break
+                                                if sum(n for _,n in budget)+size<=min(LIMIT, prepared.get('h264_kbps',480)*1000//8):break
                                                 if stop.wait(.01):return
                                         if sequence>0xffffffff:raise OSError('Sequence rollover; reconnect')
                                         header=(struct.pack('>4sIII',b'MJPG',size,sequence,0) if lane=='mjpeg' else
@@ -352,8 +373,8 @@ class NetworkVideo:
                                         if blocked is None:return
                                         now=time.monotonic()
                                         while budget and now-budget[0][0]>1.001:budget.popleft()
-                                        next_due=due+1/12
-                                        due=now+1/12 if now-next_due>=1/12 else next_due
+                                        next_due=due+1/fps
+                                        due=now+1/fps if now-next_due>=1/fps else next_due
                                         sequence+=1;timestamp+=83334
                                         with self.lock:
                                             job=self.jobs[lane];job['frames']+=1;job['payload_bytes']+=size
@@ -375,4 +396,12 @@ class NetworkVideo:
                 if lane in ('all',key):event.set()
         return self.status()
 
-    def close(self):self.stop()
+    def preview_attach(self, window_id=0):return self.preview.attach(window_id)
+    def preview_play(self, source='', format='auto', width=640, height=480, pixel_format='yuv420p', fps=25.0):
+        return self.preview.play(source,format,width,height,pixel_format,fps)
+    def preview_stop(self):return self.preview.stop()
+    def preview_status(self):return self.preview.status()
+
+    def close(self):
+        self.stop()
+        self.preview.stop()

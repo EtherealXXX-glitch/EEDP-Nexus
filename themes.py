@@ -235,9 +235,25 @@ class ThemeManager:
         style.configure("Nexus.Treeview",background=p["terminal"],fieldbackground=p["terminal"],foreground=p["text"])
         style.configure("Nexus.Treeview.Heading",background=p["field"],foreground=p["text"])
         style.map("Nexus.Treeview",background=[("selected",p["selection"])],foreground=[("selected",p["text"])])
+        style.configure("Nexus.TEntry",fieldbackground=p["field"],foreground=p["text"],
+            insertcolor=p["text"],bordercolor=p["border"],lightcolor=p["field"],darkcolor=p["field"],padding=5)
+        style.map("Nexus.TEntry",bordercolor=[("focus",p["accent"])],
+            fieldbackground=[("disabled",p["panel"])],foreground=[("disabled",p["muted"])])
+        style.configure("Nexus.TCheckbutton",background=p["panel"],foreground=p["text"],
+            focuscolor=p["panel"],indicatorcolor=p["field"])
+        style.map("Nexus.TCheckbutton",background=[("active",p["panel"])],
+            foreground=[("disabled",p["muted"])],indicatorcolor=[("selected",p["primary"]),("active",p["hover"])])
         style.configure("Nexus.TNotebook",background=p["panel"],borderwidth=0)
         style.configure("Nexus.TNotebook.Tab",background=p["field"],foreground=p["text"],padding=(14,8))
         style.map("Nexus.TNotebook.Tab",background=[("selected",p["primary"])],foreground=[("selected",p["primary_text"])])
+        # The video workspace has just two primary navigation tabs. Make the
+        # current lane larger as well as colored, so its state is unambiguous.
+        style.configure("NexusVideo.TNotebook",background=p["panel"],borderwidth=0)
+        style.configure("NexusVideo.TNotebook.Tab",background=p["field"],foreground=p["muted"],padding=(14,8))
+        style.map("NexusVideo.TNotebook.Tab",
+            background=[("selected",p["primary"]),("active",p["hover"])],
+            foreground=[("selected",p["primary_text"])],
+            padding=[("selected",(20,12)),("!selected",(14,8))])
         self.root.option_add("*TCombobox*Listbox.background",p["field"])
         self.root.option_add("*TCombobox*Listbox.foreground",p["text"])
         for callback in callbacks:callback()
