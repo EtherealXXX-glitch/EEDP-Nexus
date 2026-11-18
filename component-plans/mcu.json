@@ -1,0 +1,7 @@
+{
+  "id": "mcu",
+  "name": "MCU 多功能控制器",
+  "status": "planned",
+  "description": "仅预留位置，暂不实现或连接硬件；协议与板型后续确定。",
+  "capabilities": ["GPIO 输入/输出", "ADC", "DAC", "UART", "SPI", "PWM", "可扩展自定义能力"]
+}

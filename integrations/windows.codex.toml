@@ -1,0 +1,5 @@
+[mcp_servers.agent-workbench]
+command = 'C:\path\to\EEDP-Nexus\.venv\Scripts\python.exe'
+args = ['C:\path\to\EEDP-Nexus\mcp-bridge.py']
+startup_timeout_sec = 20
+tool_timeout_sec = 60

@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.state/
+.packaging-venv/
+build/
+dist/
+release/
+plugins/beken/bin/*.exe
+plugins/video/bin/*.exe
+plugins/video/bin/*.dll
+plugins/netvideo/bin/
+.private-cloud-backup/
+*.pre-nexus-*

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<title>EEDP Nexus modular hub</title>
+<rect x="1" y="1" width="62" height="62" rx="15" fill="#101c30"/>
+<path d="M32 7 54 20 32 33 10 20Z" fill="#8ae8ff"/>
+<path d="M10 24 30 36 30 57 10 45Z" fill="#4b91ff"/>
+<path d="M34 36 54 24 54 45 34 57Z" fill="#3adbc1"/>
+</svg>
