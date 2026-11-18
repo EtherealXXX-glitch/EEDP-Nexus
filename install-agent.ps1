@@ -46,8 +46,24 @@ if(Test-Path -LiteralPath $shortcut){
         $link.IconLocation=(Join-Path $appRoot 'EEDP Nexus.exe')+',-1'
         $link.Save()
         if(Test-Path -LiteralPath $exe){& $exe shell $shortcut}
-        else{& $python (Join-Path $appRoot 'windows_identity.py') $shortcut}
+        else{& $python (Join-Path $appRoot 'run-workbench.py') shell $shortcut}
         if($LASTEXITCODE -ne 0){throw 'Shortcut identity registration failed'}
+    }
+}
+if(Test-Path -LiteralPath $exe){
+    $gui=Join-Path $appRoot 'EEDP Nexus.exe'
+    $startShortcut=Join-Path ([Environment]::GetFolderPath('Programs')) 'EEDP Nexus.lnk'
+    $shell=New-Object -ComObject WScript.Shell
+    $startLink=$shell.CreateShortcut($startShortcut)
+    if(!(Test-Path -LiteralPath $startShortcut) -or $startLink.TargetPath -eq $gui){
+        $startLink.TargetPath=$gui
+        $startLink.WorkingDirectory=$appRoot
+        $startLink.IconLocation=$gui+',0'
+        $startLink.Save()
+        & $exe shell $startShortcut
+        if($LASTEXITCODE -ne 0){throw 'Start menu shortcut identity registration failed'}
+    }else{
+        Write-Warning 'An existing EEDP Nexus Start menu shortcut points elsewhere and was left unchanged.'
     }
 }
 if($Wsl){

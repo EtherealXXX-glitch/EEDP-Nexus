@@ -1,14 +1,16 @@
 # EEDP Nexus
 
-首次在另一台电脑使用，请看 [快速上手](GETTING-STARTED.md)：克隆后执行 `install-agent.cmd`，WSL Agent 使用 `install-agent.cmd -Wsl`。脚本自动识别路径，注册 MCP 和 Skill，新开 Agent 会话即可发现工具。
+首次在另一台电脑使用，请看 [快速上手](docs/GETTING-STARTED.md)：克隆后执行 `install-agent.cmd`，WSL Agent 使用 `install-agent.cmd -Wsl`。脚本自动识别路径，注册 MCP 和 Skill，新开 Agent 会话即可发现工具。
 Agent 入口为根目录 [SKILL.md](SKILL.md)，顶层 AGENTS.md 会引导 Agent 读取它：首次使用发现缺少注册时自动初始化，已接入时跳过安装并使用组件 Skill。
+
+参与项目开发的 Agent 可按需读取 [项目目录 Skill](skills/eedp-nexus-layout/SKILL.md) 和 [组件开发 Skill](skills/eedp-nexus-component-development/SKILL.md)；组件契约以标准手册为准。
 
 Windows 免安装程序：`release/EEDP-Nexus-v0.5.0/EEDP Nexus.exe`；发布 ZIP：`release/EEDP-Nexus-v0.5.0-win64.zip`。
 分发包：`release/EEDP Nexus-0.5.0-win64.zip`。保留完整目录，内置 Python、Tk、串口依赖与本机烧录引擎。
 桌面入口已改为“EEDP Nexus”；Agent 使用 `EEDP-Agent.exe mcp` 或 CLI，WSL 使用随包提供的桥接脚本。
 
-重新构建：使用 Python 3.12 创建 `.packaging-venv`，安装 `build-requirements.txt`，运行 `build_app.py`。
-`check-packaged.py` 使用隔离状态和回环设备验证 exe，不触碰物理串口。
+重新构建：使用 Python 3.12 创建 `.packaging-venv`，安装 `build-requirements.txt`，运行 `tools/build_app.py`。
+`tools/check-packaged.py` 使用隔离状态和回环设备验证 exe，不触碰物理串口。
 
 这是 Windows 与 WSL Agent 共用的本机能力工作台，不内置大模型或自动决策循环。
 核心服务位于 Windows，MCP / CLI 对外暴露能力，桌面界面负责状态展示和管理。
@@ -34,9 +36,9 @@ Windows 免安装程序：`release/EEDP-Nexus-v0.5.0/EEDP Nexus.exe`；发布 ZI
 启动时提供约 1 秒的几何图形点亮过渡，可点击跳过，也可在外观设置关闭。使用主线程定时绘制，不阻塞后台，不显示虚假初始化百分比。
 侧栏使用 [Lucide](https://lucide.dev/icons) 的固定版本 0.468.0 SVG，附带 ISC 许可证，按主题生成 24/28/32/40 原生尺寸图标，默认 32px。工作区外框与标题固定，上方文件/视图/设备/工具/帮助菜单均连接实际功能。Agent 桥接状态位于底部，可点击查看后台及设备占用。
 高对比方案对主要文字、按钮及边界执行计算对比度测试，以 [WCAG 对比度说明](https://www.w3.org/WAI/WCAG22/Understanding/contrast-enhanced) 为设计参考，不宣称完整软件认证。
-主题通过 themes.py 统一管理，供现有和未来组件继承，不改变采集、串口、烧录或后台服务。
+主题通过 `nexus_ui/themes.py` 统一管理，供现有和未来组件继承，不改变采集、串口、烧录或后台服务。
 
-MCU 多功能控制器仅在 component-plans/ 预留，当前不实现、不连接硬件、不暴露可调用动作。自动化开发及工具板的分阶段方向见 [单片机自动化开发路线](MCU-AUTOMATION-PLAN.md)：先用现成工具开发手头的 STM32F407，再逐步扩展为可由 Agent 控制的硬件节点。
+MCU 多功能控制器仅在 component-plans/ 预留，当前不实现、不连接硬件、不暴露可调用动作。自动化开发及工具板的分阶段方向见 [单片机自动化开发路线](docs/MCU-AUTOMATION-PLAN.md)：先用现成工具开发手头的 STM32F407，再逐步扩展为可由 Agent 控制的硬件节点。
 
 ## 结构
 
@@ -52,38 +54,43 @@ MCU 多功能控制器仅在 component-plans/ 预留，当前不实现、不连�
 
 Agent 使用 `logs.query`、`logs.inventory`、`logs.export`、`logs.policy`、`logs.maintain` RPC，或对应的 `workbench_logs_*` MCP 工具。日志策略经校验持久化，不能用通用 settings.update 绕过校验。
 
-- `core.py`：组件注册、动作描述、串口资源所有权、活动记录。
+- `nexus_core/core.py`：组件注册、动作描述、串口资源所有权、活动记录；根目录 `core.py` 保留插件兼容入口。
 - `plugins/serial/`：可单独启停、移除的串口组件。
 - `plugins/beken/`：可单独启停、移除的 Beken 烧录组件。
-- `plugin_manager.py`：扫描插件清单、检查 API 版本、管理生命周期。
-- `settings.py`：共享设置的原子保存与读取。
-- `api.py`：统一服务操作；CLI、桌面、MCP 使用同一接口。
-- `mcp-bridge.py` / `mcp_adapter.py`：标准 MCP stdio 入口与工具描述。
-- `bridge_client.py`：Windows / WSL 跨环境调用和固件交接。
+- `nexus_core/plugin_manager.py`：扫描插件清单、检查 API 版本、管理生命周期。
+- `nexus_core/settings.py`：共享设置的原子保存与读取。
+- `nexus_core/api.py`：统一服务操作；CLI、桌面、MCP 使用同一接口。
+- `mcp-bridge.py`：兼容已有 Agent 配置的 MCP 入口。
+- `agent_bridge/`：MCP 协议、Windows / WSL 桥接和 Agent 安装逻辑。
 - `run-workbench.py`：本地服务与 Agent CLI。
-- `desktop.py`：桌面客户端，各组件使用独立操作布局，通过相同组件接口执行动作。
+- `nexus_ui/desktop.py`：桌面客户端，各组件使用独立操作布局，通过相同组件接口执行动作。
 
 组件互不导入、互不调用。新组件只需提供 `plugin.json`、入口类的动作方法、
 `status()` 和 `close()`，放进 `plugins/` 后扫描即可，无需修改核心注册代码。
 接口描述中包含参数类型、默认值，以及破坏性操作标记。
-完整插件契约见 [PLUGIN-API.md](PLUGIN-API.md)。
+完整插件契约见 [PLUGIN-API.md](docs/PLUGIN-API.md)。
 
 ## 目录
 
 ```text
-workbench/
+EEDP-Nexus/
 ├── run-workbench.py / workbench.cmd   服务、CLI 与启动入口
-├── desktop.py                        深色桌面客户端
-├── api.py / core.py                  统一 API、资源协调与共享日志
-├── settings.py / plugin_manager.py   设置持久化、插件管理
-├── mcp-bridge.py / mcp_adapter.py     Agent MCP 接口
-├── bridge_client.py                  Windows / WSL 调用桥
+├── nexus_ui/                         桌面客户端、工作区与外观
+├── core.py                           插件公共接口兼容入口
+├── nexus_core/                       核心服务、API、设置与插件管理
+├── mcp-bridge.py                     Agent MCP 兼容入口
+├── agent_bridge/                     Agent 接入、MCP 与 Windows/WSL 桥接
+├── docs/                             使用说明、协议与开发规划
 ├── plugins/                          可拆卸组件包
 │   ├── serial/                       plugin.json + component.py
-│   └── beken/                        plugin.json + component.py
+│   ├── beken/                        固件烧录
+│   ├── slogic/                       逻辑分析
+│   └── netvideo/                     双路视频与预览
 ├── skills/use-agent-workbench/       Agent 使用技能与 CLI 辅助脚本
 ├── integrations/                     两端 MCP / Codex 配置
-├── test_*.py                         组件、界面与平台验证
+├── tests/                            组件、界面与平台验证
+├── tools/                            资源生成及开发检查脚本
+├── build/ / dist/ / release/         构建中间文件、构建输出与发布包
 ├── .state/                           共享设置、事件库、日志与任务快照
 └── .venv/                            独立运行环境
 ```
@@ -172,7 +179,7 @@ GUI 写入前确认；Agent CLI `beken.start` 会直接执行。中止或超时�
 运行自动检查：
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -p "test_*.py" -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p "test_*.py" -v
 ```
 
 2026-11-10 已完成组件 / 界面 / 插件 / 共享状态测试，以及 COM14 / BK7236 真实烧录。
@@ -184,6 +191,6 @@ GUI 写入前确认；Agent CLI `beken.start` 会直接执行。中止或超时�
 
 Receive display: at most 20 refreshes/sec, bounded batches and a 100,000-character view cache. Repeated NUL bytes are condensed; long lines are split. Overload skips old display entries with a notice. Raw backend events remain unchanged; pause only pauses display.
 
-双路视频发送组件 netvideo：离线预处理MJPEG/H.264，再向板卡TCP 5001/5002分别发送；转码或容器解复用需要显式提供可信FFmpeg路径，符合格式的原始 MJPEG 可直接校验。支持停止、重连、循环与H.264滑动限流，详见[组件说明](plugins/netvideo/README.md)及[协议责任文档](NETVIDEO-PROTOCOL.md)。板卡和手机曾完成短时联调，长期稳定性取决于网络及素材。
+双路视频发送组件 netvideo：离线预处理MJPEG/H.264，再向板卡TCP 5001/5002分别发送；转码或容器解复用需要显式提供可信FFmpeg路径，符合格式的原始 MJPEG 可直接校验。支持停止、重连、循环与H.264滑动限流，详见[组件说明](plugins/netvideo/README.md)及[协议责任文档](docs/NETVIDEO-PROTOCOL.md)。板卡和手机曾完成短时联调，长期稳定性取决于网络及素材。
 
 视频工作区同时显示本地与远程状态，支持一键播放两路、单路播放和停止、素材预览；高级参数默认收起。可快速切换预生成的 MJPEG 30、40、45、50、55、60 KiB 单帧上限。先选择本组 `*-mjpeg-<档位>k-1024x608-12fps.mjpeg` 文件并填写板卡 IP；原始 MJPEG 档位无需 FFmpeg。按钮只停止并重新准备、启动 MJPEG，H.264 不受操作影响。目标档位文件缺失时不会停止当前播放；切换会从目标文件开头播放，不代表网络能够稳定承载所有档位。界面速率为发送端计数，非板卡接收率。

@@ -15,11 +15,11 @@ import threading
 import time
 
 from core import Activity, Registry, Resources
-from plugin_manager import Plugins
-from settings import Settings
-from api import dispatch, VERSION
-from app_paths import ROOT, STATE, service_command, APP_NAME
-from log_store import diagnostic_path
+from nexus_core.plugin_manager import Plugins
+from nexus_core.settings import Settings
+from nexus_core.api import dispatch, VERSION
+from nexus_core.app_paths import ROOT, STATE, service_command, APP_NAME
+from nexus_core.log_store import diagnostic_path
 
 def build_registry(directory=STATE):
     activity, resources = Activity(directory / "logs"), Resources()
@@ -146,7 +146,7 @@ def serve():
 
 
 def gui():
-    from desktop import launch
+    from nexus_ui.desktop import launch
     return launch(lambda method, arguments=None: request(method, arguments, client="desktop"), ensure_started, STATE)
 
 
@@ -164,17 +164,17 @@ def main():
     parser.add_argument("--client", default=None, help="调用来源标识（审计标签，不授予权限）")
     args = parser.parse_args()
     if args.command=='shell':
-        from windows_identity import set_shortcut_identity
+        from nexus_ui.windows_identity import set_shortcut_identity
         if not args.target:raise ValueError('A shortcut path is required')
         set_shortcut_identity(args.target)
         return
     if args.command=="setup":
-        from agent_setup import main as setup
+        from agent_bridge.agent_setup import main as setup
         return setup(["--root",str(ROOT),*(["--wsl"] if args.wsl else []),*(["--plan"] if args.plan else [])])
     if args.command == "serve": return serve()
     if args.command == "gui": return gui()
     if args.command == "mcp":
-        from mcp_adapter import serve_mcp
+        from agent_bridge.mcp_adapter import serve_mcp
         ensure_started()
         return serve_mcp(lambda method, arguments=None: request(method, arguments, client="mcp-windows"))
     if args.command != "stop": ensure_started()

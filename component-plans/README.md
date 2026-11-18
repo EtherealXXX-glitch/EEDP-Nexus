@@ -4,4 +4,4 @@
 规划项在组件管理标为“规划中”，不注册 MCP/CLI 动作、不占用硬件、不能启用。
 
 MCU 多功能控制器为用户确定的后续方向：GPIO 输入/输出、ADC、DAC、UART、SPI、PWM 以及可扩展、自定义能力。
-暂不实现固件或协议。先用现成工具在 STM32F407VET6 上验证自动化开发，再逐步构建工具板；详见 [单片机自动化开发路线](../MCU-AUTOMATION-PLAN.md)。实现时按 COMPONENT-STANDARD.md 创建实际插件，并移除对应规划项。
+暂不实现固件或协议。先用现成工具在 STM32F407VET6 上验证自动化开发，再逐步构建工具板；详见 [单片机自动化开发路线](../docs/MCU-AUTOMATION-PLAN.md)。实现时按 COMPONENT-STANDARD.md 创建实际插件，并移除对应规划项。

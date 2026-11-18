@@ -192,3 +192,5 @@ MJPEG preparation uses the bundled Pillow/libjpeg helper and verifies each JPEG 
 For pre-generated raw `.mjpeg` files, `mjpeg_passthrough=true` validates frames without FFmpeg; container input still needs FFmpeg. The video workspace shows both lanes, offers one-click playback and quality switches, and reports sender-side rates rather than receiver measurements.
 
 MJPEG 可以指定 `mjpeg_fps`（1–15，默认 12），本地视频界面提供 12/15 帧与 30、35、40、45、50、55、60 KiB/帧档位；H.264 页面固定 60 KB/秒载荷上限。
+
+The SLogic desktop viewer pans with the wheel or left-drag on empty space; Ctrl+wheel zooms time. Height buttons adjust waveform amplitude. Add up to six colored time-anchored markers using the toolbar, drag them with the left button, and remove one with the right button. Hover over a marker to read its time. Opening another file clears markers. The channel-name control saves display names for D0–D7 without changing physical channel IDs. Protocol decoding remains available through the component API.

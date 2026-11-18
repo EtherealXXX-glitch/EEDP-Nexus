@@ -1,11 +1,8 @@
-"""Portable MCP entry point for Windows or WSL agents (standard library only)."""
-import os
+"""Compatibility entry point for existing source-mode Agent configurations."""
+from pathlib import Path
+import runpy
 import sys
-from bridge_client import Client
-from mcp_adapter import serve_mcp
 
-if __name__ == "__main__":
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stdin.reconfigure(encoding="utf-8")
-    client = Client("mcp-windows" if os.name == "nt" else "mcp-wsl")
-    serve_mcp(client.request)
+bridge = Path(__file__).resolve().parent / "agent_bridge"
+sys.path.insert(0, str(bridge))
+runpy.run_path(str(bridge / "mcp-bridge.py"), run_name="__main__")

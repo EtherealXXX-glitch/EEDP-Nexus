@@ -5,8 +5,8 @@ from pathlib import Path
 import tempfile
 
 from core import Activity, Registry, Resources
-from plugin_manager import Plugins
-from settings import Settings
+from nexus_core.plugin_manager import Plugins
+from nexus_core.settings import Settings
 
 
 def main():

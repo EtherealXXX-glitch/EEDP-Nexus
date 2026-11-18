@@ -19,7 +19,7 @@ H.264统一转为640×360、12fps、baseline、无B帧、约一秒关键帧，AU
 
 缓存放在.state/runtime/netvideo，重新准备成功后回收同通道旧缓存；重启不自动恢复或发送。缓存不是永久媒体库。共享日志只保存调用和任务摘要，不存逐帧视频。禁用前须停止并等待任务结束。
 WSL调用可使用/mnt/c等Windows盘路径；Linux私有文件须先复制到Windows盘，不对异步素材做短生命周期暂存。
-板卡及手机曾进行双路联调；自动画质版本仍需完成长时间稳定性验证，Wi-Fi测试结果不能代表ETH表现。协议与责任见仓库NETVIDEO-PROTOCOL.md。
+板卡及手机曾进行双路联调；自动画质版本仍需完成长时间稳定性验证，Wi-Fi测试结果不能代表ETH表现。协议与责任见仓库 `docs/NETVIDEO-PROTOCOL.md`。
 
 MJPEG 可选 `mjpeg_passthrough=true`：只解封装现有 MJPEG，逐帧校验 1024×608、采样 21/11/11 和所选单帧上限后发送，不重新编码；发送时按选择的帧率节奏。原始 `.mjpeg` 文件可直接校验并准备，无需 FFmpeg；容器文件仍需提供 FFmpeg。原始文件按指定帧率和 `duration_s` 限制准备帧数。
 MJPEG 发送可选 `mjpeg_pacing_ms`（0～70，默认 0）：将单帧按 8 KiB 分块，在指定时间内发送，用于观察无线链路是否受突发流量影响；不改变帧率上限或视频格式。`send_max_ms` 包含主动节流，`send_block_max_ms` 统计分块写入调用耗时之和的最大值。
