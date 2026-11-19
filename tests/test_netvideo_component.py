@@ -152,6 +152,100 @@ class NetworkVideoTests(unittest.TestCase):
                         self.assertEqual(status['prepared'][lane]['h264_kbps'],320)
             finally:component.close();activity.close()
 
+    def test_pause_and_resume_mjpeg_preserves_position_without_catchup(self):
+        with tempfile.TemporaryDirectory(dir=ROOT/'build') as tmp:
+            activity=Activity(Path(tmp)/'logs');component=module.NetworkVideo(activity,Resources())
+            path=Path(tmp)/'frames'
+            frames=[b'frame'+bytes([i]) for i in range(40)]
+            path.write_bytes(b''.join(struct.pack('>I',len(x))+x for x in frames))
+            component.ready['mjpeg']=dict(path=str(path),fps=12)
+            server=socket.socket();server.bind(('127.0.0.1',0));server.listen();server.settimeout(.2)
+            received=[];done=threading.Event()
+            def receive():
+                while not done.is_set():
+                    try:conn,_=server.accept()
+                    except socket.timeout:continue
+                    except OSError:return
+                    with conn:
+                        conn.settimeout(.2);buf=b''
+                        while not done.is_set():
+                            try:chunk=conn.recv(4096)
+                            except socket.timeout:continue
+                            except OSError:break
+                            if not chunk:break
+                            buf+=chunk
+                            while len(buf)>=16:
+                                size=struct.unpack('>4sIII',buf[:16])[1]
+                                if len(buf)<16+size:break
+                                received.append(buf[16:16+size][-1]);buf=buf[16+size:]
+            thread=threading.Thread(target=receive,daemon=True);thread.start()
+            try:
+                component.start('mjpeg','127.0.0.1',server.getsockname()[1],False)
+                until=time.monotonic()+3
+                while len(received)<5 and time.monotonic()<until:time.sleep(.01)
+                self.assertGreaterEqual(len(received),5)
+                component.pause('mjpeg')
+                until=time.monotonic()+3
+                while component.status()['lanes']['mjpeg']['stage']!='已暂停' and time.monotonic()<until:time.sleep(.01)
+                self.assertEqual(component.status()['lanes']['mjpeg']['stage'],'已暂停')
+                time.sleep(.2);count=len(received);last=received[-1];time.sleep(.25)
+                self.assertEqual(len(received),count)
+                component.resume('mjpeg')
+                until=time.monotonic()+3
+                while len(received)==count and time.monotonic()<until:time.sleep(.01)
+                self.assertGreater(len(received),count)
+                self.assertEqual(received[count],last+1)
+            finally:
+                component.stop();done.set();server.close();thread.join(1);activity.close()
+
+    def test_resume_h264_starts_with_previous_keyframe(self):
+        with tempfile.TemporaryDirectory(dir=ROOT/'build') as tmp:
+            activity=Activity(Path(tmp)/'logs');component=module.NetworkVideo(activity,Resources())
+            path=Path(tmp)/'frames';key=b'\x00\x00\x01\x67s\x00\x00\x01\x68p\x00\x00\x01\x65'
+            normal=b'\x00\x00\x01\x41'
+            frames=[(key if i%4==0 else normal)+bytes([i]) for i in range(24)]
+            path.write_bytes(b''.join(struct.pack('>I',len(x))+x for x in frames))
+            component.ready['h264']=dict(path=str(path),h264_kbps=480)
+            server=socket.socket();server.bind(('127.0.0.1',0));server.listen();server.settimeout(.2)
+            connections=[];done=threading.Event()
+            def receive():
+                while not done.is_set():
+                    try:conn,_=server.accept()
+                    except socket.timeout:continue
+                    except OSError:return
+                    items=[];connections.append(items)
+                    with conn:
+                        conn.settimeout(.2);buf=b''
+                        while not done.is_set():
+                            try:chunk=conn.recv(4096)
+                            except socket.timeout:continue
+                            except OSError:break
+                            if not chunk:break
+                            buf+=chunk
+                            while len(buf)>=24:
+                                size=struct.unpack('>4sIIIQ',buf[:24])[1]
+                                if len(buf)<24+size:break
+                                items.append(buf[24:24+size]);buf=buf[24+size:]
+            thread=threading.Thread(target=receive,daemon=True);thread.start()
+            try:
+                component.start('h264','127.0.0.1',server.getsockname()[1],False)
+                until=time.monotonic()+3
+                while (not connections or len(connections[0])<6) and time.monotonic()<until:time.sleep(.01)
+                self.assertGreaterEqual(len(connections[0]),6)
+                component.pause('h264')
+                until=time.monotonic()+3
+                while component.status()['lanes']['h264']['stage']!='已暂停' and time.monotonic()<until:time.sleep(.01)
+                self.assertEqual(component.status()['lanes']['h264']['stage'],'已暂停')
+                last=connections[0][-1][-1]
+                component.resume('h264')
+                until=time.monotonic()+3
+                while (len(connections)<2 or not connections[1]) and time.monotonic()<until:time.sleep(.01)
+                self.assertGreaterEqual(len(connections),2)
+                self.assertTrue(module.keyframe(connections[1][0]))
+                self.assertEqual(connections[1][0][-1],last//4*4)
+            finally:
+                component.stop();done.set();server.close();thread.join(1);activity.close()
+
     def test_loopback_two_frames_and_resource_release(self):
         with tempfile.TemporaryDirectory(dir=ROOT/'build') as tmp:
             activity=Activity(Path(tmp)/'logs');resources=Resources()

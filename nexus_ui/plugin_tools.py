@@ -15,8 +15,18 @@ def open_plugin_tools(root, identifier, background_request, frame, label, button
     selector = tk.StringVar()
     combo = ttk.Combobox(window, textvariable=selector, state="readonly")
     combo.pack(fill="x", padx=18, pady=12)
-    parameters = frame(window)
-    parameters.pack(fill="x", padx=18)
+    parameter_host = frame(window)
+    parameter_host.pack(fill="x", padx=18)
+    parameter_canvas = tk.Canvas(parameter_host, height=210, bg="#252830", highlightthickness=0)
+    parameter_scroll = ttk.Scrollbar(parameter_host, orient="vertical", command=parameter_canvas.yview)
+    parameter_canvas.configure(yscrollcommand=parameter_scroll.set)
+    parameter_canvas.pack(side="left", fill="x", expand=True)
+    parameter_scroll.pack(side="right", fill="y")
+    parameters = frame(parameter_canvas)
+    parameter_window = parameter_canvas.create_window((0, 0), window=parameters, anchor="nw")
+    parameters.bind("<Configure>", lambda _: parameter_canvas.configure(scrollregion=parameter_canvas.bbox("all")))
+    parameter_canvas.bind("<Configure>", lambda event: parameter_canvas.itemconfigure(parameter_window, width=event.width))
+    parameter_canvas.bind("<MouseWheel>", lambda event: parameter_canvas.yview_scroll(-int(event.delta / 120), "units"))
     parameters.columnconfigure(1, weight=1)
     feedback = label(window, "正在加载组件接口…", muted=True)
     feedback.pack(fill="x", padx=18, pady=8)
@@ -58,7 +68,7 @@ def open_plugin_tools(root, identifier, background_request, frame, label, button
             else:
                 widget = tk.Entry(parameters, textvariable=variable, bg="#30343e", fg="#e3e6ed", insertbackground="#e3e6ed", relief="flat")
             widget.grid(row=row, column=1, sticky="ew", pady=4, ipady=5)
-            if name in ("input", "firmware", "engine"):
+            if name in ("input", "firmware", "engine", "source"):
                 def choose(value=variable):
                     path = filedialog.askopenfilename(parent=window)
                     if path: value.set(path)

@@ -18,6 +18,7 @@ from nexus_core.log_store import diagnostic_path
 from nexus_ui.log_center import open_log_center
 from nexus_ui.plugin_tools import open_plugin_tools
 from nexus_ui.logic_view import open_logic_view
+from nexus_ui.plot_view import open_plot_view
 from nexus_ui.netvideo_view import open_netvideo_view
 from nexus_ui.themes import ThemeManager
 from nexus_ui.buttons import ActionButton
@@ -258,12 +259,14 @@ def _launch(request, ensure_started, state_directory):
     workspace_body.columnconfigure(0,weight=1)
     logic_host = frame(workspace_body, BG)
     netvideo_host = frame(workspace_body, BG)
+    plot_host = frame(workspace_body, BG)
     utility_host = frame(workspace_body, PANEL)
     utility_page = {"name":None, "refresh":None}
     empty_workspace = frame(workspace_body, BG)
     label(empty_workspace, "没有启用的组件\n从右侧组件管理安装或启用工具", muted=True, justify="center").pack(expand=True)
     logic_workspace = None
     netvideo_workspace = None
+    plot_workspace = None
 
     def rail_button(parent, text, command, icon="blocks"):
         item = button(parent, text, command, small=True, _flat=True)
@@ -580,7 +583,7 @@ def _launch(request, ensure_started, state_directory):
         frame(parent, BORDER, height=1).pack(fill="x", padx=14, pady=8)
 
     def select(component):
-        nonlocal selected, port_box, logic_workspace, netvideo_workspace
+        nonlocal selected, port_box, logic_workspace, netvideo_workspace, plot_workspace
         if selected == "netvideo" and component != "netvideo" and netvideo_workspace is not None:
             netvideo_workspace.stop_preview()
         selected = component
@@ -589,6 +592,15 @@ def _launch(request, ensure_started, state_directory):
         empty_workspace.grid_remove()
         utility_host.grid_remove()
         netvideo_host.grid_remove()
+        plot_host.grid_remove()
+        if component == "plot":
+            main.grid_remove()
+            logic_host.grid_remove()
+            plot_host.grid(row=0,column=0,sticky="nsew")
+            if plot_workspace is None or not plot_workspace.winfo_exists():
+                plot_workspace=open_plot_view(plot_host,background_request,frame,label,button)
+                plot_workspace.pack(fill="both",expand=True)
+            return
         if component == "netvideo":
             main.grid_remove()
             logic_host.grid_remove()
@@ -710,6 +722,7 @@ def _launch(request, ensure_started, state_directory):
     def show_utility(name):
         main.grid_remove()
         logic_host.grid_remove()
+        plot_host.grid_remove()
         if netvideo_host.grid_info() and netvideo_workspace is not None:
             netvideo_workspace.stop_preview()
         netvideo_host.grid_remove()
@@ -784,9 +797,7 @@ def _launch(request, ensure_started, state_directory):
                     label(line, plugin['name'] if plugin.get("planned") else f"{plugin['name']}  v{plugin['version']}").pack(side="left", padx=12)
                     if plugin.get("planned"):
                         label(line,"规划中 · "+" / ".join(plugin.get("capabilities",[])),muted=True).pack(side="left",padx=8)
-                        reserved=button(line,"预留位置",lambda:None,small=True)
-                        reserved.configure(state="disabled")
-                        reserved.pack(side="right",padx=8)
+                        label(line,"尚未实现",muted=True).pack(side="right",padx=8)
                         continue
                     label(line, "已启用" if plugin["enabled"] else "已禁用", muted=not plugin["enabled"]).pack(side="left", padx=12)
                     if plugin.get("error"): label(line, plugin["error"], muted=True).pack(side="left")
@@ -999,6 +1010,11 @@ def _launch(request, ensure_started, state_directory):
             def failed(error):messagebox.showerror('无法禁用组件',str(error),parent=root)
             background_request('plugins.set',{'id':identifier,'enabled':False},lambda result:None,failed)
         menu.add_command(label='禁用组件',command=disable)
+        def advanced_actions():
+            if show_utility('plugin:'+identifier):
+                view = open_plugin_tools(utility_host, identifier, background_request, frame, label, button, embedded=True)
+                view.pack(fill='both', expand=True)
+        menu.add_command(label='高级操作',command=advanced_actions)
         def popup(event):
             try:menu.tk_popup(event.x_root,event.y_root)
             finally:menu.grab_release()
@@ -1009,7 +1025,7 @@ def _launch(request, ensure_started, state_directory):
     for identifier,widget in tabs.items():bind_component_menu(identifier,widget)
     known_enabled = None
     def sync_components():
-        nonlocal known_enabled, logic_workspace
+        nonlocal known_enabled, logic_workspace, plot_workspace
         for identifier in states:
             if identifier not in tabs:
                 tabs[identifier] = rail_button(activity_components, "◇\n"+identifier[:8], lambda c=identifier:select(c))
@@ -1030,6 +1046,10 @@ def _launch(request, ensure_started, state_directory):
         if "slogic" not in enabled and logic_workspace is not None:
             if logic_workspace.winfo_exists(): logic_workspace.destroy()
             logic_workspace = None
+        if "plot" not in enabled and plot_workspace is not None:
+            if plot_workspace.winfo_exists(): plot_workspace.destroy()
+            plot_workspace = None
+            plot_host.grid_remove()
         desired = saved.get("selected") if first_load else None
         if desired in enabled and desired != selected: select(desired)
         elif selected not in enabled:
@@ -1072,6 +1092,8 @@ def _launch(request, ensure_started, state_directory):
             if kind == "events":
                 if value["dropped"]: append("显示缓存已轮换，完整记录保存在日志目录。\n", "notice")
                 for item in value["events"]:
+                    if plot_workspace is not None and plot_workspace.winfo_exists():
+                        plot_workspace.consume_event(item)
                     if item["kind"] in ("call", "result", "error", "finished"): history.append(item)
                     component = item["component"]
                     if component not in events: continue

@@ -66,6 +66,7 @@ field 类型为 str/int/float/bool；choices 为有效枚举。服务校验未�
 只读动作不能同时 destructive；打开会切换控制线的连接、串口发送、固件写入、中止硬件任务需显式标记。
 离线解码/导出会产生文件，因此 read_only=false，但无需标记硬件写入。
 波形视窗等大型结果可声明 `log_result="summary"`，共享日志截断为摘要，原始文件为权威数据。
+高频只读视窗可声明 `log_result="omit"`，日志仅记录返回数据大小；动作结果仍完整返回给调用方，避免周期刷新产生大量重复日志。
 
 ## 4. 生命周期与资源
 
@@ -145,8 +146,12 @@ netvideo 为独立、可拆卸的双路TCP视频发送组件，schema 1.1，通�
 
 组件活动栏右键提供组件设置及禁用入口；设置针对component.<id>共享范围，禁用交给后台生命周期检查，失败时显示原因，不得强制释放活动资源。netvideo MJPEG 每帧按SOF校验1024×608和采样21/11/11，无法符合时拒绝发送。
 
+专用工作区的活动栏右键同时提供“高级操作”，打开对应组件的通用动作表单；只展示已发现的动作，执行前仍按组件动作的危险标记确认，不能隐式启动硬件操作。
+
 Receive display: at most 20 refreshes/sec, bounded batches and a 100,000-character view cache. Repeated NUL bytes are condensed; long lines are split. Overload skips old display entries with a notice. Raw backend events remain unchanged; pause only pauses display.
 
 SLogic 波形滚轮平移时间轴，Ctrl+滚轮按鼠标位置缩放；空白处左键拖动平移。高度通过两个按钮调整；最多六条标尺由按钮添加，左键拖动、右键删除，标尺绑定采样时间并在打开新文件时清空。
 六条标尺使用不同颜色和顶部三角标记；D0–D7 可保存自定义显示名称，物理编号和波形数据不改变。协议解码保留组件离线接口，波形页面不提供固定映射表单。
 当前缓存精度不足时显示加载细节状态，并在窗口变化后请求所需精度；后台按桶数向上取整的精度判定须与界面一致，避免精细视图被误判。活动色带只表示桶内存在变化，不得伪造精确电平。
+
+plot 数据波形使用 `@plot name=value,...` 行格式，从现有串口事件读取，不自行占用串口；通道名称遵循 ASCII 标识符规则，最多 16 个字段，数值必须有限。接收按行重组并限制长度，波形缓存最多 5000 点，不能因为格式错误阻塞串口或主界面。

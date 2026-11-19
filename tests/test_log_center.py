@@ -45,6 +45,8 @@ class LogCenterTest(unittest.TestCase):
                 try:
                     tree = next(w for w in descendants(window) if isinstance(w, ttk.Treeview))
                     self.assertEqual(len(tree.get_children()), 2)
+                    filters = [w for w in descendants(window) if isinstance(w, ttk.Combobox)]
+                    self.assertTrue(any('netvideo' in w.cget('values') for w in filters))
                     next(w for w in descendants(window) if isinstance(w, tk.Button) and w.cget("text") == "调用记录").invoke()
                 except Exception as exc: failures.append(exc)
                 root.after(100, second)

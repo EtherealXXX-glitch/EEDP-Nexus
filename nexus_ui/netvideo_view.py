@@ -36,7 +36,6 @@ def open_netvideo_view(parent, request, frame, label, button):
     display_hz_status = tk.StringVar(value='自研板：请选择目标刷新率；实际值以板卡为准。')
     variant_status = tk.StringVar(value='未选择档位')
     mjpeg_pacing = tk.StringVar(value='0')
-    bitrate = tk.StringVar(value='60')
     preset = tk.StringVar(value='medium')
     h264_auto = tk.BooleanVar(value=True)
     h264_passthrough = tk.BooleanVar(value=False)
@@ -107,7 +106,10 @@ def open_netvideo_view(parent, request, frame, label, button):
         ttk.Entry(file_row, style='Nexus.TEntry', textvariable=sources[lane], width=12).grid(row=0, column=0, sticky='ew', padx=(0, 4))
         def browse(which=lane):
             path = filedialog.askopenfilename(parent=view, filetypes=[('视频文件', '*.avi *.mp4 *.mov *.mkv *.h264 *.mjpeg'), ('全部文件', '*.*')])
-            if path: sources[which].set(path)
+            if path:
+                sources[which].set(path)
+                request('settings.update', {'scope':'component.netvideo-ui', 'values':{'default_' + which + '_source':path}},
+                        lambda _: None, lambda error: state.set('素材路径未能保存：' + str(error)) if view.winfo_exists() else None)
         button(file_row, '选择视频', browse, small=True).grid(row=0, column=1, padx=2)
 
         settings = frame(advanced)
@@ -130,8 +132,9 @@ def open_netvideo_view(parent, request, frame, label, button):
 
         actions = frame(box); actions.grid(row=4, column=0, sticky='w', padx=8, pady=5)
         button(actions, '播放', lambda k=lane: play(k), primary=True, small=True).grid(row=0, column=0, padx=(0, 4), pady=2)
-        button(actions, '停止', lambda k=lane: action(k, 'stop'), small=True).grid(row=0, column=1, padx=4, pady=2)
-        button(actions, '预览', lambda k=lane: preview(k), small=True).grid(row=0, column=2, padx=4, pady=2)
+        button(actions, '暂停', lambda k=lane: action(k, 'pause'), small=True).grid(row=0, column=1, padx=4, pady=2)
+        button(actions, '停止', lambda k=lane: action(k, 'stop'), small=True).grid(row=0, column=2, padx=4, pady=2)
+        button(actions, '预览', lambda k=lane: preview(k), small=True).grid(row=0, column=3, padx=4, pady=2)
         button(settings, '准备视频', lambda k=lane: action(k, 'prepare'), small=True).grid(row=6, column=0, sticky='w')
         if lane == 'mjpeg':
             variant_title = label(box, '', muted=True); variant_title.configure(textvariable=variant_status)
@@ -226,7 +229,11 @@ def open_netvideo_view(parent, request, frame, label, button):
                     def started(result):
                         nonlocal quick_busy
                         quick_busy = False; consume(result)
-                        if view.winfo_exists(): state.set(f'已切换到 {limit} KiB/帧。')
+                        if view.winfo_exists():
+                            state.set(f'已启动 {limit} KiB/帧发送任务，请查看连接状态。')
+                            request('settings.update', {'scope':'component.netvideo-ui', 'values':{
+                                'last_host':start_args['host'], 'default_mjpeg_source':target}}, lambda _: None,
+                                lambda error: state.set('发送任务已启动，但地址或素材未能保存：' + str(error)) if view.winfo_exists() else None)
                     request('call', {'target':'netvideo.start', 'arguments':start_args}, started, fail)
             request('call', {'target':'netvideo.status', 'arguments':{}}, checked, fail)
         request('call', {'target':'netvideo.stop', 'arguments':{'lane':'mjpeg'}},
@@ -241,16 +248,6 @@ def open_netvideo_view(parent, request, frame, label, button):
         if exclusive.get():
             advanced.grid(); state.set('两路互斥已开启，请先在高级设置中关闭。'); return
         play('mjpeg', lambda: play('h264'))
-
-    def apply_phone_bitrate():
-        def checked(result):
-            if not view.winfo_exists(): return
-            if not result.get('capabilities', {}).get('h264_selected_peak_limit'):
-                state.set('码率控制需要更新发送后台；请先重启工作台后台服务。')
-                return
-            play('h264', force_reencode=True)
-        request('call', {'target':'netvideo.status', 'arguments':{}}, checked,
-                lambda error: state.set('无法检查发送后台：' + str(error)) if view.winfo_exists() else None)
 
     def play(which, after=None, force_reencode=False):
         nonlocal quick_busy
@@ -267,7 +264,11 @@ def open_netvideo_view(parent, request, frame, label, button):
         same = os.path.normcase(os.path.normpath(source)) == os.path.normcase(os.path.normpath(str(info.get('source') or '')))
         job = jobs.get(which, {})
         if same and not force_reencode and job.get('state') == 'running' and job.get('operation') == 'send':
-            state.set(('板卡' if which == 'mjpeg' else '手机') + '视频正在发送。')
+            if job.get('stage') in ('已暂停', '正在暂停'):
+                action(which, 'resume')
+                if after: after()
+                return
+            state.set(('板卡' if which == 'mjpeg' else '手机') + '视频正在发送；更改板卡地址后请先停止再播放。')
             if after: after()
             return
         try:
@@ -297,7 +298,12 @@ def open_netvideo_view(parent, request, frame, label, button):
             def started(result):
                 nonlocal quick_busy
                 quick_busy = False; consume(result)
-                if view.winfo_exists(): state.set(('板卡' if which == 'mjpeg' else '手机') + '视频已开始发送。')
+                if view.winfo_exists():
+                    state.set(('板卡' if which == 'mjpeg' else '手机') + '发送任务已启动，请查看连接状态。')
+                    request('settings.update', {'scope':'component.netvideo-ui', 'values':{
+                        'last_host':start_args['host'], 'default_' + which + '_source':source}},
+                        lambda _: None,
+                        lambda error: state.set('发送任务已启动，但地址或素材未能保存：' + str(error)) if view.winfo_exists() else None)
                 if after: after()
             request('call', {'target':'netvideo.start', 'arguments':start_args}, started, fail)
         if same and not force_reencode:
@@ -325,7 +331,8 @@ def open_netvideo_view(parent, request, frame, label, button):
                             duration_s=int(duration.get()), mjpeg_passthrough=passthrough.get() if which == 'mjpeg' else False,
                             jpeg_quality=int(quality.get()), jpeg_limit_kib=int(jpeg_limit.get()), mjpeg_fps=int(mjpeg_fps.get()), h264_auto=h264_auto.get(),
                             h264_kbps=480, h264_preset=preset.get(), h264_passthrough=h264_passthrough.get() if which == 'h264' else False)
-                if not args['source'] or not args['engine']:
+                raw_mjpeg = which == 'mjpeg' and args['mjpeg_passthrough'] and args['source'].lower().endswith('.mjpeg')
+                if not args['source'] or (not raw_mjpeg and not args['engine']):
                     state.set('请先选择视频文件和 FFmpeg。'); return
             elif operation == 'start':
                 args = dict(lane=which, host=host.get().strip(), port=int(ports[which].get()), loop=loop.get(), exclusive=exclusive.get(),
@@ -343,7 +350,7 @@ def open_netvideo_view(parent, request, frame, label, button):
                 args = dict(lane=which)
         except ValueError:
             state.set('请检查时长、端口、质量和码率是否为数字。'); return
-        state.set(('板卡画面' if which == 'mjpeg' else '手机画面') + '：' + {'prepare':'正在准备', 'start':'正在启动', 'stop':'正在停止'}[operation])
+        state.set(('板卡画面' if which == 'mjpeg' else '手机画面') + '：' + {'prepare':'正在准备', 'start':'正在启动', 'pause':'正在暂停', 'resume':'正在继续', 'stop':'正在停止'}[operation])
         def succeeded(result):
             consume(result)
             if operation == 'start' and view.winfo_exists():
@@ -365,7 +372,12 @@ def open_netvideo_view(parent, request, frame, label, button):
 
     def preview(lane):
         nonlocal preview_active, preview_generation, preview_window
-        path = prepared.get(lane, {}).get('preview_path') or sources[lane].get().strip()
+        info = prepared.get(lane, {})
+        selected = sources[lane].get().strip()
+        loaded = str(info.get('source') or '')
+        same_source = bool(loaded and selected and os.path.normcase(os.path.normpath(loaded)) == os.path.normcase(os.path.normpath(selected)))
+        use_prepared = bool(info.get('preview_path') and (same_source or not selected))
+        path = info['preview_path'] if use_prepared else selected
         if not path:
             state.set('请先选择视频文件。'); return
         fmt = lane if path.lower().endswith(('.mjpeg', '.h264')) else 'auto'
@@ -390,8 +402,9 @@ def open_netvideo_view(parent, request, frame, label, button):
             nonlocal preview_active
             if not view.winfo_exists() or generation != preview_generation: return
             preview_active = True
-            request('call', {'target':'netvideo.preview_play', 'arguments':{'source':path, 'format':fmt, 'fps':float(prepared.get(lane, {}).get('fps', 12))}},
-                    lambda _: state.set('正在预览处理后的 '+lane) if view.winfo_exists() else None, failed)
+            fps = float(info.get('fps', 12)) if use_prepared else float(mjpeg_fps.get() if lane == 'mjpeg' else 12)
+            request('call', {'target':'netvideo.preview_play', 'arguments':{'source':path, 'format':fmt, 'fps':fps}},
+                    lambda _: state.set(('正在预览处理后的 ' if use_prepared else '正在预览新源文件（尚未准备）：') + lane) if view.winfo_exists() else None, failed)
         def attach(_):
             if view.winfo_exists() and generation == preview_generation:
                 request('call', {'target':'netvideo.preview_attach', 'arguments':{'window_id':surface.winfo_id()}}, play, failed)
@@ -434,7 +447,7 @@ def open_netvideo_view(parent, request, frame, label, button):
             if not info:
                 details[lane].set('请选择视频并准备'); continue
             source = info.get('source') or '未知'
-            if not sources[lane].get(): sources[lane].set(source)
+            if not sources[lane].get() and info.get('source'): sources[lane].set(info['source'])
             if lane not in initialised:
                 if lane == 'mjpeg' and info.get('jpeg_limit_kib'): jpeg_limit.set(str(info['jpeg_limit_kib']))
                 if lane == 'mjpeg' and info.get('fps') in (12, 15): mjpeg_fps.set(str(info['fps']))

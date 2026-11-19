@@ -30,6 +30,8 @@ class ComponentMenuTest(unittest.TestCase):
                     assert menus and menus[0].entrycget(0,'label')=='组件设置'
                     menus[0].invoke(0)
                     menus[0].invoke(1)
+                    assert menus[0].entrycget(2,'label')=='高级操作'
+                    menus[0].invoke(2)
                     self.after(400,self.destroy)
                 except Exception as exc:failures.append(exc);self.destroy()
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent/'build') as tmp:

@@ -1,0 +1,10 @@
+{
+  "api_version": 1,
+  "schema_version": "1.1",
+  "id": "plot",
+  "name": "数据波形",
+  "version": "1.0.0",
+  "entrypoint": "component.py:Plot",
+  "documentation": "README.md",
+  "ui": {"view": "generic"}
+}

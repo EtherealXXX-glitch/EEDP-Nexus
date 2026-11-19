@@ -30,7 +30,7 @@ def open_log_center(root, background_request, state_directory, frame, label, but
     variables = {}
     for index, (key, caption, choices) in enumerate((
         ("start", "开始日期", None), ("end", "结束日期", None),
-        ("component", "插件", ["", "serial", "beken", "slogic", "workbench"]),
+        ("component", "插件", ["", "serial", "beken", "slogic", "netvideo", "workbench"]),
         ("kind", "事件", ["", "call", "result", "error", "rx", "tx", "finished", "output"]),
         ("client", "来源", None))):
         label(filters, caption, muted=True).grid(row=0, column=index, sticky="w")

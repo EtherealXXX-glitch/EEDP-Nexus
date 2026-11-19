@@ -29,7 +29,7 @@ def main():
         return json.loads(p.stdout)
     try:
         tools = cli("tools")
-        assert {t["id"] for t in tools} == {"serial", "beken", "slogic", "netvideo"}, tools
+        assert {t["id"] for t in tools} == {"serial", "beken", "slogic", "netvideo", "plot"}, tools
         video = cli("call", "netvideo.preview_status")
         assert video["engine_available"] and video["state"] == "idle", video
         decoder=cli("call","slogic.decoder","--args",json.dumps({"name":"uart"}))

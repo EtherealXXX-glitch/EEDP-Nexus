@@ -116,6 +116,8 @@ class NetworkVideo:
             field('port','端口（0=默认5001/5002）',0,kind='int'),field('loop','循环发送',True,kind='bool'),
             field('exclusive','两路互斥',True,kind='bool'),
             field('mjpeg_pacing_ms','MJPEG 分块发送时间（0–70 毫秒）',0,kind='int')]),
+        'pause':dict(label='暂停通道',read_only=False,destructive=True,fields=[field('lane','通道','mjpeg',['mjpeg','h264'])]),
+        'resume':dict(label='继续通道',read_only=False,destructive=True,fields=[field('lane','通道','mjpeg',['mjpeg','h264'])]),
         'stop':dict(label='停止通道',read_only=False,destructive=True,fields=[field('lane','通道','all',['all','mjpeg','h264'])]),
         'preview_attach':dict(label='绑定预览窗口',read_only=False,destructive=False,fields=_preview_module.VideoPlayer.actions['attach']['fields']),
         'preview_play':dict(label='预览素材',read_only=False,destructive=False,fields=_preview_module.VideoPlayer.actions['play']['fields']),
@@ -127,6 +129,7 @@ class NetworkVideo:
         self.lock=threading.RLock()
         self.jobs={}
         self.controls={}
+        self.pauses={}
         self.ready={}
         self.cache=activity.directory.parent/'runtime/netvideo'
         self.preview=_preview_module.VideoPlayer(activity,resources)
@@ -151,6 +154,7 @@ class NetworkVideo:
                         raise ValueError('两路互斥：请先停止另一通道并等待结束')
             stop=threading.Event()
             self.controls[lane]=stop
+            self.pauses[lane]=threading.Event()
             self.jobs[lane]=dict(id=uuid.uuid4().hex,state='running',stage=stage,operation=operation,exclusive=exclusive,started=time.time(),frames=0,payload_bytes=0,reconnects=0,error='')
             def run():
                 try:
@@ -332,62 +336,108 @@ class NetworkVideo:
         def work(stop):
             resource=f'TCP:{host}:{port}'
             self.resources.acquire(resource,self.id)
+            pause=self.pauses[lane]
             budget=collections.deque()
             frame_budget=collections.deque()
             fps=prepared.get('fps',12) if lane=='mjpeg' else 12
+            position=0
+            last_key_position=0
+            reconnect=False
             try:
                 while not stop.is_set():
+                    if pause.is_set():
+                        with self.lock:self.jobs[lane]['stage']='已暂停'
+                        while pause.is_set() and not stop.wait(.05):pass
+                        if stop.is_set():return
+                        # H.264 接收端重连后需要 SPS/PPS 和关键帧；从上一关键帧恢复。
+                        if lane=='h264':position=last_key_position
+                        reconnect=True
                     try:
                         with socket.create_connection((host,port),timeout=2) as conn:
                             conn.settimeout(2)
                             sequence=1;timestamp=0;due=time.monotonic()
-                            while not stop.is_set():
-                                with open(prepared['path'],'rb') as stream:
-                                    while length:=stream.read(4):
-                                        size=struct.unpack('>I',length)[0]
-                                        if not 1<=size<=LIMIT:raise ValueError('Corrupt prepared frame')
-                                        frame=stream.read(size)
-                                        if len(frame)!=size:raise ValueError('Truncated prepared frame')
-                                        if stop.wait(max(0,due-time.monotonic())):return
-                                        # Limit starts to the configured rate in any rolling second.
+                            if reconnect and lane=='h264':position=last_key_position
+                            reconnect=False
+                            with open(prepared['path'],'rb') as stream:
+                                stream.seek(position)
+                                while not stop.is_set() and not pause.is_set():
+                                    frame_position=stream.tell()
+                                    length=stream.read(4)
+                                    if not length:
+                                        if not loop:return
+                                        stream.seek(0);position=0;last_key_position=0
+                                        continue
+                                    if len(length)!=4:raise ValueError('Truncated prepared frame header')
+                                    size=struct.unpack('>I',length)[0]
+                                    if not 1<=size<=LIMIT:raise ValueError('Corrupt prepared frame')
+                                    frame=stream.read(size)
+                                    if len(frame)!=size:raise ValueError('Truncated prepared frame')
+                                    if stop.wait(max(0,due-time.monotonic())):return
+                                    if pause.is_set():break
+                                    # 保留滑动帧数与码率限制，暂停后不会突发补帧。
+                                    while True:
+                                        now=time.monotonic()
+                                        while frame_budget and now-frame_budget[0]>=1.0:frame_budget.popleft()
+                                        if len(frame_budget)<fps:break
+                                        if stop.wait(max(0.001,1.0-(now-frame_budget[0]))):return
+                                        if pause.is_set():break
+                                    if pause.is_set():break
+                                    if lane=='h264':
                                         while True:
                                             now=time.monotonic()
-                                            while frame_budget and now-frame_budget[0]>=1.0:frame_budget.popleft()
-                                            if len(frame_budget)<fps:break
-                                            if stop.wait(max(0.001,1.0-(now-frame_budget[0]))):return
-                                        if lane=='h264':
-                                            while True:
-                                                now=time.monotonic()
-                                                while budget and now-budget[0][0]>1.001:budget.popleft()
-                                                if sum(n for _,n in budget)+size<=min(LIMIT, prepared.get('h264_kbps',480)*1000//8):break
-                                                if stop.wait(.01):return
-                                        if sequence>0xffffffff:raise OSError('Sequence rollover; reconnect')
-                                        header=(struct.pack('>4sIII',b'MJPG',size,sequence,0) if lane=='mjpeg' else
-                                                struct.pack('>4sIIIQ',b'H264',size,sequence,int(keyframe(frame)),timestamp))
-                                        send_started=time.monotonic()
-                                        frame_budget.append(send_started)
-                                        budget.append((send_started,size))
-                                        try:
-                                            blocked=send_paced(conn,header+frame,stop,mjpeg_pacing_ms if lane=='mjpeg' else 0)
-                                        finally:budget[-1]=(time.monotonic(),size)
-                                        if blocked is None:return
-                                        now=time.monotonic()
-                                        while budget and now-budget[0][0]>1.001:budget.popleft()
-                                        next_due=due+1/fps
-                                        due=now+1/fps if now-next_due>=1/fps else next_due
-                                        sequence+=1;timestamp+=83334
-                                        with self.lock:
-                                            job=self.jobs[lane];job['frames']+=1;job['payload_bytes']+=size
-                                            job.update(stage='发送中',last_sequence=sequence-1,window_payload_bytes=sum(n for _,n in budget),
-                                                       send_max_ms=max(job.get('send_max_ms',0),round((now-send_started)*1000,2)),
-                                                       send_block_max_ms=max(job.get('send_block_max_ms',0),round(blocked*1000,2)),
-                                                       mjpeg_pacing_ms=mjpeg_pacing_ms if lane=='mjpeg' else 0)
-                                if not loop:return
+                                            while budget and now-budget[0][0]>1.001:budget.popleft()
+                                            if sum(n for _,n in budget)+size<=min(LIMIT, prepared.get('h264_kbps',480)*1000//8):break
+                                            if stop.wait(.01):return
+                                            if pause.is_set():break
+                                    if pause.is_set():break
+                                    if sequence>0xffffffff:raise OSError('Sequence rollover; reconnect')
+                                    is_key=lane=='h264' and keyframe(frame)
+                                    header=(struct.pack('>4sIII',b'MJPG',size,sequence,0) if lane=='mjpeg' else
+                                            struct.pack('>4sIIIQ',b'H264',size,sequence,int(is_key),timestamp))
+                                    send_started=time.monotonic()
+                                    frame_budget.append(send_started)
+                                    budget.append((send_started,size))
+                                    try:blocked=send_paced(conn,header+frame,stop,mjpeg_pacing_ms if lane=='mjpeg' else 0)
+                                    finally:budget[-1]=(time.monotonic(),size)
+                                    if blocked is None:return
+                                    position=stream.tell()             # 只在完整发送后推进续播位置。
+                                    if is_key:last_key_position=frame_position
+                                    now=time.monotonic()
+                                    while budget and now-budget[0][0]>1.001:budget.popleft()
+                                    next_due=due+1/fps
+                                    due=now+1/fps if now-next_due>=1/fps else next_due
+                                    sequence+=1;timestamp+=83334
+                                    with self.lock:
+                                        job=self.jobs[lane];job['frames']+=1;job['payload_bytes']+=size
+                                        job.update(stage='发送中',last_sequence=sequence-1,window_payload_bytes=sum(n for _,n in budget),
+                                                   send_max_ms=max(job.get('send_max_ms',0),round((now-send_started)*1000,2)),
+                                                   send_block_max_ms=max(job.get('send_block_max_ms',0),round(blocked*1000,2)),
+                                                   mjpeg_pacing_ms=mjpeg_pacing_ms if lane=='mjpeg' else 0)
                     except OSError as exc:
+                        reconnect=True
                         with self.lock:self.jobs[lane].update(stage='等待重连',error=str(exc));self.jobs[lane]['reconnects']+=1
                         if stop.wait(2):return
             finally:self.resources.release(resource,self.id)
         return self._launch(lane,'连接中',work,operation='send',exclusive=exclusive)
+
+    def pause(self,lane='mjpeg'):
+        if lane not in ('mjpeg','h264'):raise ValueError('Unknown lane')
+        with self.lock:
+            job=self.jobs.get(lane,{})
+            if job.get('state')!='running' or job.get('operation')!='send':raise ValueError('该通道没有运行中的发送任务')
+            self.pauses[lane].set()
+            job['stage']='正在暂停'
+        return self.status()
+
+    def resume(self,lane='mjpeg'):
+        if lane not in ('mjpeg','h264'):raise ValueError('Unknown lane')
+        with self.lock:
+            job=self.jobs.get(lane,{})
+            if job.get('state')!='running' or job.get('operation')!='send' or not self.pauses[lane].is_set():
+                raise ValueError('该通道没有暂停中的发送任务')
+            self.pauses[lane].clear()
+            job['stage']='正在继续'
+        return self.status()
 
     def stop(self,lane='all'):
         if lane not in ('all','mjpeg','h264'):raise ValueError('Unknown lane')

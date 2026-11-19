@@ -212,9 +212,12 @@ class Registry:
                 ephemeral = {p["name"] for p in component.actions[action].get("fields", []) if not p.get("remember", True)}
                 remembered = {k: v for k, v in arguments.items() if k != "text" and k not in ephemeral and
                               not (isinstance(v, str) and ".state" in v and "requests" in v)}
-                self.settings.update("component." + component_id, {action: remembered})
+                if remembered:
+                    self.settings.update("component." + component_id, {action: remembered})
             text = json.dumps(result, ensure_ascii=False)
-            if component.actions[action].get("log_result") == "summary" and len(text)>8192:
+            if component.actions[action].get("log_result") == "omit":
+                text = f"已返回数据（{len(text)} 字符）"
+            elif component.actions[action].get("log_result") == "summary" and len(text)>8192:
                 text = text[:8192]+"…（视窗结果摘要，完整数据保存在原始波形中）"
             self.activity.emit(component_id, "result", f"{target}: {text}", client=client)
             return result

@@ -90,6 +90,32 @@ class NetVideoViewTest(unittest.TestCase):
                 self.assertFalse(any(a.get('target')=='netvideo.prepare' for _,a in calls))
         finally: root.destroy()
 
+    def test_pause_button_and_play_resumes_same_stream(self):
+        root=tk.Tk();root.withdraw();calls=[]
+        def frame(parent,*args,**kwargs):return tk.Frame(parent)
+        def label(parent,text='',**kwargs):kwargs.pop('muted',None);return tk.Label(parent,text=text,**kwargs)
+        def button(parent,text,command,**kwargs):
+            kwargs.pop('small',None);kwargs.pop('primary',None);return tk.Button(parent,text=text,command=command,**kwargs)
+        def request(method,args,ok=None,fail=None):
+            calls.append((method,args))
+            if method=='settings.get': result={'last_host':'169.254.180.100'}
+            else: result={}
+            if ok:ok(result)
+        try:
+            with patch('nexus_ui.netvideo_view.os.path.isfile',return_value=True):
+                view=open_netvideo_view(root,request,frame,label,button);view.pack();root.update_idletasks()
+                ready={'mjpeg':{'source':r'C:\clip.mjpeg'}}
+                view.consume_status({'prepared':ready,'lanes':{'mjpeg':{'state':'running','operation':'send','stage':'发送中'}}})
+                calls.clear()
+                next(w for w in descendants(view) if isinstance(w,tk.Button) and w.cget('text')=='暂停').invoke()
+                self.assertTrue(any(a.get('target')=='netvideo.pause' and a['arguments']['lane']=='mjpeg' for _,a in calls))
+                view.consume_status({'prepared':ready,'lanes':{'mjpeg':{'state':'running','operation':'send','stage':'已暂停'}}})
+                calls.clear()
+                next(w for w in descendants(view) if isinstance(w,tk.Button) and w.cget('text')=='播放').invoke()
+                self.assertTrue(any(a.get('target')=='netvideo.resume' and a['arguments']['lane']=='mjpeg' for _,a in calls))
+                self.assertFalse(any(a.get('target')=='netvideo.start' for _,a in calls))
+        finally:root.destroy()
+
     def test_quick_switch_only_restarts_mjpeg(self):
         root = tk.Tk(); root.withdraw(); calls = []; prepared = False
         def frame(parent, *args, **kwargs): return tk.Frame(parent)
@@ -271,5 +297,63 @@ class NetVideoViewTest(unittest.TestCase):
             self.assertEqual(calls[-1][1]['target'], 'netvideo.preview_stop')
         finally:
             root.destroy()
+
+    def test_preview_follows_new_source_instead_of_stale_prepared_file(self):
+        root=tk.Tk(); root.withdraw(); calls=[]
+        def frame(parent,*a,**k): return tk.Frame(parent)
+        def label(parent,text='',**k): k.pop('muted',None); return tk.Label(parent,text=text,**k)
+        def button(parent,text,command,**k):
+            k.pop('small',None); k.pop('primary',None); return tk.Button(parent,text=text,command=command,**k)
+        def request(method,args,ok=None,fail=None):
+            calls.append((method,args))
+            if ok: ok({})
+        try:
+            view=open_netvideo_view(root,request,frame,label,button); view.pack(); root.update_idletasks()
+            view.consume_status({'prepared':{'mjpeg':{'source':'C:/old.mjpeg','preview_path':'C:/old-preview.mjpeg','fps':12}},'lanes':{}})
+            entry=next(w for w in descendants(view) if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox) and w.get()=='C:/old.mjpeg')
+            entry.delete(0,'end'); entry.insert(0,'C:/new.mjpeg')
+            calls.clear(); next(w for w in descendants(view) if isinstance(w,tk.Button) and w.cget('text')=='预览').invoke()
+            play=next(args['arguments'] for method,args in calls if method=='call' and args.get('target')=='netvideo.preview_play')
+            self.assertEqual(play['source'],'C:/new.mjpeg')
+            labels=[root.getvar(w.cget('textvariable')) for w in descendants(view) if isinstance(w,tk.Label) and w.cget('textvariable')]
+            self.assertTrue(any('尚未准备' in value for value in labels))
+            view.stop_preview()
+        finally: root.destroy()
+
+    def test_raw_mjpeg_preparation_does_not_require_ffmpeg(self):
+        root=tk.Tk(); root.withdraw(); calls=[]
+        def frame(parent,*a,**k): return tk.Frame(parent)
+        def label(parent,text='',**k): k.pop('muted',None); return tk.Label(parent,text=text,**k)
+        def button(parent,text,command,**k):
+            k.pop('small',None); k.pop('primary',None); return tk.Button(parent,text=text,command=command,**k)
+        def request(method,args,ok=None,fail=None):
+            calls.append((method,args))
+            if ok: ok({'default_mjpeg_source':'C:/raw.mjpeg'} if method=='settings.get' else {})
+        try:
+            view=open_netvideo_view(root,request,frame,label,button); view.pack(); root.update_idletasks()
+            toggle=next(w for w in descendants(view) if isinstance(w,ttk.Checkbutton) and w.cget('text')=='符合规格的 MJPEG 直发')
+            toggle.invoke(); calls.clear()
+            next(w for w in descendants(view) if isinstance(w,tk.Button) and w.cget('text')=='准备视频').invoke()
+            args=next(a['arguments'] for method,a in calls if method=='call' and a.get('target')=='netvideo.prepare')
+            self.assertEqual(args['source'],'C:/raw.mjpeg'); self.assertTrue(args['mjpeg_passthrough']); self.assertEqual(args['engine'],'')
+        finally: root.destroy()
+
+    def test_successful_play_remembers_host_and_source(self):
+        root=tk.Tk(); root.withdraw(); calls=[]
+        def frame(parent,*a,**k): return tk.Frame(parent)
+        def label(parent,text='',**k): k.pop('muted',None); return tk.Label(parent,text=text,**k)
+        def button(parent,text,command,**k):
+            k.pop('small',None); k.pop('primary',None); return tk.Button(parent,text=text,command=command,**k)
+        def request(method,args,ok=None,fail=None):
+            calls.append((method,args))
+            if ok: ok({'last_host':'169.254.180.100'} if method=='settings.get' else {})
+        try:
+            view=open_netvideo_view(root,request,frame,label,button); view.pack(); root.update_idletasks()
+            view.consume_status({'prepared':{'mjpeg':{'source':'C:/video.mjpeg'}},'lanes':{}})
+            with patch('nexus_ui.netvideo_view.os.path.isfile',return_value=True):
+                next(w for w in descendants(view) if isinstance(w,tk.Button) and w.cget('text')=='播放').invoke()
+            saved=[a['values'] for method,a in calls if method=='settings.update' and 'last_host' in a['values']]
+            self.assertEqual(saved[-1],{'last_host':'169.254.180.100','default_mjpeg_source':'C:/video.mjpeg'})
+        finally: root.destroy()
 
 if __name__ == '__main__': unittest.main()

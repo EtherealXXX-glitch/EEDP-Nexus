@@ -1,1 +1,1 @@
-{"api_version":1,"schema_version":"1.1","id":"netvideo","name":"双路视频发送","version":"0.2.0","entrypoint":"component.py:NetworkVideo","documentation":"README.md","ui":{"view":"generic"}}
+{"api_version":1,"schema_version":"1.1","id":"netvideo","name":"双路视频发送","version":"0.2.1","entrypoint":"component.py:NetworkVideo","documentation":"README.md","ui":{"view":"generic"}}
