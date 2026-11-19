@@ -49,6 +49,7 @@ def open_netvideo_view(parent, request, frame, label, button):
     preview_generation = 0
     preview_window = None
     quick_busy = False
+    doorbell_generation = 0
     previous = {}
     jobs = {}
 
@@ -192,17 +193,62 @@ def open_netvideo_view(parent, request, frame, label, button):
         request('call', {'target':'serial.status', 'arguments':{}}, checked, failed)
 
     def doorbell_command(operation):
-        # 串口写入成功只代表命令已发送，手机是否振铃仍以板卡反馈及 App 为准。
+        # 读取命令发送后的串口反馈；写入成功本身不代表手机收到呼叫。
+        nonlocal doorbell_generation
+        doorbell_generation += 1
+        generation = doorbell_generation
+        fragments = []
+        def valid(): return view.winfo_exists() and generation == doorbell_generation
         def failed(error):
-            if view.winfo_exists(): doorbell_status.set('门铃命令未发送：' + str(error))
+            if valid(): doorbell_status.set('门铃操作失败：' + str(error))
+        def poll(cursor, remaining):
+            if not valid(): return
+            def received(page):
+                if not valid(): return
+                fragments.extend(e.get('text', '') for e in page.get('events', []) if e.get('kind') == 'rx')
+                text = ''.join(fragments)[-8192:]
+                if '[DOORBELL] call already active' in text:
+                    doorbell_status.set('已有呼叫或通话，需结束后再拨；未接听超过 45 秒可再次拨号。'); return
+                if '[DOORBELL] operation busy' in text:
+                    doorbell_status.set('门铃正在处理，请稍后再试。'); return
+                if '[DOORBELL] cloud or doorbell not ready' in text:
+                    doorbell_status.set('板卡门铃尚未就绪或涂鸦云离线，请查看串口。'); return
+                error = re.search(r'\[DOORBELL\] (?:task create failed|retry cleanup failed)=(-?\d+)', text)
+                if error:
+                    doorbell_status.set('门铃启动失败，错误码 ' + error.group(1) + '；请检查板卡资源。'); return
+                result = re.search(r'\[DOORBELL\] (ring|stop) result=(-?\d+)', text)
+                if result:
+                    action, code = result.groups()
+                    if code != '0': doorbell_status.set('板卡门铃请求失败，错误码 ' + code + '。')
+                    elif action == 'ring': doorbell_status.set('板卡已发起呼叫，请查看手机是否收到。')
+                    else: doorbell_status.set('板卡已发送结束呼叫请求。')
+                    return
+                result = re.search(r'\[DOORBELL\] ready=(\d+) state=(\d+) busy=(\d+) result=(-?\d+)', text)
+                if result:
+                    ready, call_state, busy, code = result.groups()
+                    names = {'0':'空闲','1':'呼叫中','2':'已接听'}
+                    doorbell_status.set('门铃%s，%s；操作%s，最近返回码 %s。' % (
+                        '就绪' if ready == '1' else '未就绪', names.get(call_state, '未知'),
+                        '处理中' if busy == '1' else '空闲', code))
+                    return
+                if remaining <= 0:
+                    doorbell_status.set('命令已发送，但未收到完整板卡反馈；请查看串口。'); return
+                view.after(250, lambda: poll(page.get('cursor', cursor), remaining - 1))
+            request('events', {'after':cursor, 'component':'serial', 'limit':1000}, received, failed)
         def checked(result):
-            if not view.winfo_exists(): return
+            if not valid(): return
             if not result.get('connected'):
                 doorbell_status.set('串口未连接：请先在串口监控中连接板卡。'); return
-            request('call', {'target':'serial.send', 'arguments':{
-                'text':f'app cloud doorbell {operation}', 'newline':'CRLF', 'hex_mode':False}},
-                lambda _: doorbell_status.set('命令已发送，请查看串口反馈和手机界面。') if view.winfo_exists() else None,
-                failed)
+            def snapshot(info):
+                if not valid(): return
+                cursor = info.get('event_cursor', 0)
+                def sent(_):
+                    if valid():
+                        doorbell_status.set('命令已发送，正在等待板卡反馈…')
+                        view.after(150, lambda: poll(cursor, 20))
+                request('call', {'target':'serial.send', 'arguments':{
+                    'text':f'app cloud doorbell {operation}', 'newline':'CRLF', 'hex_mode':False}}, sent, failed)
+            request('status', {}, snapshot, failed)
         request('call', {'target':'serial.status', 'arguments':{}}, checked, failed)
 
     def quick_switch(limit):

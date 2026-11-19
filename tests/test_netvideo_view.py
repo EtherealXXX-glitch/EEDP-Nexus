@@ -52,8 +52,32 @@ class NetVideoViewTest(unittest.TestCase):
             connected=True
             for label_name, operation in [('呼叫手机','ring'),('结束呼叫','stop'),('查询呼叫状态','status')]:
                 calls.clear(); buttons[label_name].invoke()
-                self.assertEqual([a.get('target') for _,a in calls],['serial.status','serial.send'])
+                self.assertEqual([a.get('target') for method,a in calls if method == 'call'],['serial.status','serial.send'])
                 self.assertEqual(calls[-1][1]['arguments'], {'text':'app cloud doorbell '+operation,'newline':'CRLF','hex_mode':False})
+        finally: root.destroy()
+
+    def test_doorbell_feedback_reports_active_call(self):
+        root=tk.Tk(); root.withdraw(); calls=[]
+        def frame(parent,*a,**k): return tk.Frame(parent)
+        def label(parent,text='',**k): k.pop('muted',None); return tk.Label(parent,text=text,**k)
+        def button(parent,text,command,**k):
+            k.pop('small',None); k.pop('primary',None); return tk.Button(parent,text=text,command=command,**k)
+        def request(method,args,ok=None,fail=None):
+            calls.append((method,args))
+            if method == 'status': result={'event_cursor':123}
+            elif method == 'events': result={'cursor':125,'events':[{'kind':'rx','text':'[DOOR'}, {'kind':'rx','text':'BELL] call already active; stop first\r\n'}]}
+            elif args.get('target') == 'serial.status': result={'connected':True}
+            else: result={}
+            if ok: ok(result)
+        try:
+            view=open_netvideo_view(root,request,frame,label,button);view.pack();root.update_idletasks()
+            next(w for w in descendants(view) if isinstance(w,tk.Button) and w.cget('text')=='呼叫手机').invoke()
+            deadline=time.monotonic()+1
+            while time.monotonic()<deadline:
+                root.update(); time.sleep(.01)
+                hints=[w.cget('text') for w in descendants(view) if isinstance(w,tk.Label)]
+                if any('已有呼叫或通话' in text for text in hints): break
+            self.assertTrue(any('已有呼叫或通话' in text for text in hints))
         finally: root.destroy()
 
     def test_mjpeg_fps_and_frame_limit_controls(self):
