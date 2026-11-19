@@ -34,6 +34,7 @@ def open_netvideo_view(parent, request, frame, label, button):
     mjpeg_fps = tk.StringVar(value='12')
     display_hz = tk.StringVar(value='30')
     display_hz_status = tk.StringVar(value='自研板：请选择目标刷新率；实际值以板卡为准。')
+    doorbell_status = tk.StringVar(value='呼叫手机需先连接板卡串口，并启动涂鸦云。')
     variant_status = tk.StringVar(value='未选择档位')
     mjpeg_pacing = tk.StringVar(value='0')
     preset = tk.StringVar(value='medium')
@@ -158,6 +159,13 @@ def open_netvideo_view(parent, request, frame, label, button):
             label(rate_row, '手机视频上限（KB/秒）', muted=True).grid(row=0, column=0, sticky='w')
             label(rate_row, '固定 60 KB/秒', muted=True).grid(row=0, column=1, padx=8)
             label(box, '手机视频载荷上限 60 KB/秒（不含网络协议开销）。', muted=True).grid(row=6, column=0, sticky='w', padx=8, pady=4)
+            call_row = frame(box); call_row.grid(row=7, column=0, sticky='w', padx=8, pady=(4, 2))
+            button(call_row, '呼叫手机', lambda: doorbell_command('ring'), primary=True, small=True).grid(row=0, column=0, padx=(0, 4))
+            button(call_row, '结束呼叫', lambda: doorbell_command('stop'), small=True).grid(row=0, column=1, padx=4)
+            button(call_row, '查询呼叫状态', lambda: doorbell_command('status'), small=True).grid(row=0, column=2, padx=4)
+            call_hint = label(box, '', muted=True)
+            call_hint.configure(textvariable=doorbell_status, justify='left', anchor='w', wraplength=500)
+            call_hint.grid(row=9, column=0, sticky='ew', padx=8, pady=(0, 4))
         description = label(box, '', muted=True)
         description.configure(textvariable=details[lane], justify='left', anchor='w', wraplength=260)
         description.grid(row=8, column=0, sticky='ew', padx=8, pady=4)
@@ -180,6 +188,20 @@ def open_netvideo_view(parent, request, frame, label, button):
             request('call', {'target':'serial.send', 'arguments':{
                 'text':f'app display refresh {hz}', 'newline':'CRLF', 'hex_mode':False}},
                 lambda _: display_hz_status.set(f'已发送 {hz} Hz 请求；请查看板卡串口反馈。') if view.winfo_exists() else None,
+                failed)
+        request('call', {'target':'serial.status', 'arguments':{}}, checked, failed)
+
+    def doorbell_command(operation):
+        # 串口写入成功只代表命令已发送，手机是否振铃仍以板卡反馈及 App 为准。
+        def failed(error):
+            if view.winfo_exists(): doorbell_status.set('门铃命令未发送：' + str(error))
+        def checked(result):
+            if not view.winfo_exists(): return
+            if not result.get('connected'):
+                doorbell_status.set('串口未连接：请先在串口监控中连接板卡。'); return
+            request('call', {'target':'serial.send', 'arguments':{
+                'text':f'app cloud doorbell {operation}', 'newline':'CRLF', 'hex_mode':False}},
+                lambda _: doorbell_status.set('命令已发送，请查看串口反馈和手机界面。') if view.winfo_exists() else None,
                 failed)
         request('call', {'target':'serial.status', 'arguments':{}}, checked, failed)
 

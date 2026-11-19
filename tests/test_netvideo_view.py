@@ -35,6 +35,27 @@ class NetVideoViewTest(unittest.TestCase):
             self.assertEqual(calls[-1][1]['arguments'], {'text':'app display refresh 48','newline':'CRLF','hex_mode':False})
         finally: root.destroy()
 
+    def test_doorbell_actions_require_serial_and_send_expected_command(self):
+        root=tk.Tk(); root.withdraw(); calls=[]; connected=False
+        def frame(parent,*a,**k): return tk.Frame(parent)
+        def label(parent,text='',**k): k.pop('muted',None); return tk.Label(parent,text=text,**k)
+        def button(parent,text,command,**k):
+            k.pop('small',None); k.pop('primary',None); return tk.Button(parent,text=text,command=command,**k)
+        def request(method,args,ok=None,fail=None):
+            calls.append((method,args))
+            if ok: ok({'connected':connected} if args.get('target')=='serial.status' else {})
+        try:
+            view=open_netvideo_view(root,request,frame,label,button);view.pack();root.update_idletasks()
+            buttons={w.cget('text'):w for w in descendants(view) if isinstance(w,tk.Button)}
+            calls.clear(); buttons['呼叫手机'].invoke()
+            self.assertEqual([a.get('target') for _,a in calls],['serial.status'])
+            connected=True
+            for label_name, operation in [('呼叫手机','ring'),('结束呼叫','stop'),('查询呼叫状态','status')]:
+                calls.clear(); buttons[label_name].invoke()
+                self.assertEqual([a.get('target') for _,a in calls],['serial.status','serial.send'])
+                self.assertEqual(calls[-1][1]['arguments'], {'text':'app cloud doorbell '+operation,'newline':'CRLF','hex_mode':False})
+        finally: root.destroy()
+
     def test_mjpeg_fps_and_frame_limit_controls(self):
         root=tk.Tk();root.withdraw();calls=[];preparing=False
         def frame(parent,*a,**k):return tk.Frame(parent)
